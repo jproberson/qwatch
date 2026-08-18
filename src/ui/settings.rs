@@ -8,6 +8,7 @@ pub enum Choice {
     Watching(bool),
     Profile(String),
     Rebind(String),
+    Update,
     Nothing,
 }
 

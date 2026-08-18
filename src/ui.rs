@@ -9,7 +9,7 @@ use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::remember::{Book, Remembered};
 use crate::scan::{self, Entry, Queue};
-use crate::ui::settings::{Choice, Panel, Section, choosing, rebinding, telling};
+use crate::ui::settings::{Choice, Entry as Setting, Panel, Section, choosing, rebinding, telling};
 use crate::ui::table::{Order, Row};
 use crate::ui::theme::Theme;
 use crate::watch;
@@ -51,6 +51,7 @@ pub struct App {
     pub name: String,
     pub book: Book,
     pub book_path: Option<PathBuf>,
+    pub config_path: Option<PathBuf>,
     pub help_scroll: u16,
     pub theme: Theme,
     pub now: SystemTime,
@@ -62,6 +63,7 @@ pub struct App {
     canonical_root: PathBuf,
     running: bool,
     edit: Option<PathBuf>,
+    updating: bool,
 }
 
 impl App {
@@ -97,6 +99,7 @@ impl App {
             name: String::new(),
             book: Book::default(),
             book_path: None,
+            config_path: None,
             help_scroll: 0,
             theme: Theme::default(),
             now: SystemTime::now(),
@@ -108,6 +111,7 @@ impl App {
             canonical_root,
             running: true,
             edit: None,
+            updating: false,
         };
         app.rebuild(scan::scan(&app.profile)?);
         Ok(app)
@@ -424,6 +428,29 @@ impl App {
             ],
         });
         sections.push(Section {
+            title: "about".to_string(),
+            note: "nothing here rewrites your files".to_string(),
+            entries: vec![
+                telling(format!("{:<12} {}", "installed", crate::update::VERSION)),
+                telling(format!(
+                    "{:<12} {}",
+                    "config",
+                    self.config_path
+                        .as_deref()
+                        .map_or("none".to_string(), |path| shortened(path))
+                )),
+                telling(format!(
+                    "{:<12} {}",
+                    "settings",
+                    self.book_path
+                        .as_deref()
+                        .map_or("not saved".to_string(), |path| shortened(path))
+                )),
+                telling(String::new()),
+                choosing(&crate::update::described(), false, Choice::Update),
+            ],
+        });
+        sections.push(Section {
             title: "keys".to_string(),
             note: "enter, then press the key you want".to_string(),
             entries: self
@@ -513,6 +540,10 @@ impl App {
     fn take_up(&mut self, choice: Choice) {
         match choice {
             Choice::Nothing | Choice::Rebind(_) => {}
+            Choice::Update => {
+                self.updating = true;
+                self.running = false;
+            }
             Choice::Layout(layout) => {
                 self.layout = layout;
                 self.relist();
@@ -744,6 +775,7 @@ pub fn run(chosen: crate::Chosen) -> Result<()> {
     app.name = chosen.name;
     app.book = book;
     app.book_path = chosen.book;
+    app.config_path = chosen.config;
     if let Some(layout) = remembered.layout {
         app.layout = layout;
     }
@@ -766,6 +798,9 @@ pub fn run(chosen: crate::Chosen) -> Result<()> {
         ratatui::restore();
         outcome?;
 
+        if app.updating {
+            return crate::update::run();
+        }
         match app.edit.take() {
             None => return Ok(()),
             Some(path) => {
@@ -974,6 +1009,51 @@ label   = "id"
         app.catalogue.insert("receipts-only".to_string(), other);
         app.panel = Some(Panel::opened_at(&app.sections()));
         println!("\n{}\n", screen(&mut app, 92, 20));
+    }
+
+    #[test]
+    fn renders_the_about_tab() {
+        let (root, mut app) = fixture();
+        app.config_path = Some(root.path().join("config.toml"));
+        app.book_path = Some(root.path().join("remembered.toml"));
+
+        let sections = app.sections();
+        let mut panel = Panel::opened_at(&sections);
+        while sections[panel.tab].title != "about" {
+            panel.switch_tab(1, &sections);
+        }
+        app.panel = Some(panel);
+        println!("\n{}\n", screen(&mut app, 92, 16));
+    }
+
+    #[test]
+    fn choosing_update_leaves_the_browser_to_go_and_do_it() {
+        let (_root, mut app) = fixture();
+        open_settings(&mut app);
+        let sections = app.sections();
+        let about = sections.iter().position(|s| s.title == "about").unwrap();
+        app.panel.as_mut().unwrap().tab = about;
+        app.panel.as_mut().unwrap().cursor = sections[about]
+            .entries
+            .iter()
+            .position(Setting::selectable)
+            .unwrap();
+
+        tap(&mut app, KeyCode::Enter);
+        assert!(app.updating);
+        assert!(!app.running, "it has to leave the terminal to run cargo");
+    }
+
+    #[test]
+    fn the_about_tab_only_offers_the_update_and_tells_the_rest() {
+        let (_root, app) = fixture();
+        let sections = app.sections();
+        let about = sections.iter().find(|s| s.title == "about").unwrap();
+
+        let selectable: Vec<&Setting> = about.entries.iter().filter(|e| e.selectable()).collect();
+        assert_eq!(selectable.len(), 1);
+        assert!(selectable[0].label.starts_with("update from"));
+        assert!(about.entries.iter().any(|e| e.label.contains("installed")));
     }
 
     #[test]

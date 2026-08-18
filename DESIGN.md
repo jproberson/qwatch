@@ -483,6 +483,14 @@ Asking for the browser without a terminal says so instead of panicking, which is
 what happens if the terminal is initialised anyway. Colour follows `NO_COLOR`,
 and `--no-color` says the same thing on the command line.
 
+The about section of the settings panel updates in place: it leaves the
+terminal, runs the same `cargo install --git` a reader would type, and says to
+start again. It also lists the installed version and the full path of both the
+config and the remembered settings, because the question anyone asks before
+letting a program update itself is what else it is about to touch. The answer is
+nothing: cargo replaces a binary in its own bin directory and never looks at
+`~/.config`.
+
 Installation is `cargo install --git` and nothing else. Shipping prebuilt Macs
 binaries means either signing them or telling every reader to strip a quarantine
 attribute off a download, and a stale binary attached to an old tag is worse

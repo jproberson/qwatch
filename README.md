@@ -139,8 +139,10 @@ You need Rust. [rustup.rs](https://rustup.rs) if you have not got it.
 cargo install --git https://github.com/jproberson/qwatch
 ```
 
-Run the same command again to update. From a checkout, `cargo install --path .`
-does the same thing.
+Run the same command again to update, or open `ctrl-s` and pick **about**, which
+does it for you. Either way your config and settings are left alone: cargo
+replaces a binary and never touches `~/.config/qwatch`. From a checkout,
+`cargo install --path .` does the same thing.
 
 Then `qwatch init <your queue directory>` to write a starting config, and
 `qwatch` to browse it.

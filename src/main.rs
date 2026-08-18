@@ -10,6 +10,7 @@ mod status;
 #[cfg(test)]
 mod testing;
 mod ui;
+mod update;
 mod watch;
 
 use anyhow::{Context, Result, bail};
@@ -121,6 +122,7 @@ pub struct Chosen {
     pub catalogue: BTreeMap<String, Profile>,
     pub name: String,
     pub book: Option<PathBuf>,
+    pub config: Option<PathBuf>,
     pub colored: bool,
 }
 
@@ -133,6 +135,7 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
             book: config::default_config_path()
                 .as_deref()
                 .map(remember::beside),
+            config: None,
             colored: wants_colour(options),
         });
     }
@@ -161,6 +164,7 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
         catalogue: config.profile,
         name,
         book: Some(remember::beside(&path)),
+        config: Some(path),
         colored: wants_colour(options),
     })
 }
