@@ -27,9 +27,13 @@ Every subdirectory is read as a state, or the directory itself if it has none.
 starter config:
 
 ```
-qwatch init ~/work/ingest          # writes it
-qwatch init ~/work/ingest --print  # just shows it
+qwatch init ~/work/ingest                       # writes it to your config
+qwatch init ~/work/ingest --print               # just shows it
+qwatch init ~/work/ingest -o team-queues.toml   # somewhere you can share it
 ```
+
+A profile written with `-o` is a plain file you can check into a team's own
+repo, so everyone browses the same layout with `qwatch --config`.
 
 It finds the suffix that pairs your queue directories with their failure
 siblings, flags the failure state so it sorts first, and prints one of your real

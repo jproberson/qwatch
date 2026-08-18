@@ -2,7 +2,7 @@ use crate::preview::Line as PreviewLine;
 use crate::ui::App;
 use crate::ui::table::Row;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Padding, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use std::time::SystemTime;
 
 const QUEUE_CAP: usize = 18;
@@ -21,7 +21,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     frame.render_widget(footer_line(app), footer);
 
     if app.help {
-        draw_overlay(frame, body, "Keys", help_lines(app));
+        draw_overlay(frame, body, "Keys", help_lines(app), app.help_scroll);
     } else if let Some(prompt) = &app.prompt {
         draw_overlay(
             frame,
@@ -35,6 +35,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                     app.theme.muted(),
                 )),
             ],
+            0,
         );
     }
 }
@@ -236,9 +237,21 @@ fn key_line(app: &App, key: &str, meaning: &str) -> Line<'static> {
     ])
 }
 
-fn draw_overlay(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'static>>) {
-    let height = (lines.len() as u16 + 2).min(area.height);
+fn draw_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    scroll: u16,
+) {
     let width = area.width.saturating_sub(area.width / 4).max(30).min(area.width);
+    let inner = width.saturating_sub(4).max(1) as usize;
+    let wrapped: usize = lines
+        .iter()
+        .map(|line| line.width().div_ceil(inner).max(1))
+        .sum();
+    let height = (wrapped as u16 + 2).min(area.height);
+
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -246,14 +259,23 @@ fn draw_overlay(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'sta
         height,
     };
 
+    let hidden = (wrapped as u16 + 2).saturating_sub(area.height);
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
+        .title(format!(" {title} "));
+    if hidden > 0 {
+        block = block.title_bottom(
+            Line::from(format!(" {} more, j/k to scroll ", hidden)).right_aligned(),
+        );
+    }
+
     frame.render_widget(Clear, popup);
     frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::bordered()
-                .border_type(BorderType::Rounded)
-                .padding(Padding::horizontal(1))
-                .title(format!(" {title} ")),
-        ),
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
         popup,
     );
 }

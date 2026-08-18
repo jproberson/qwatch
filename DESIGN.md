@@ -344,6 +344,8 @@ qwatch --config PATH      read a different config file
 qwatch --list             list every file and exit
 qwatch --json             list every file as JSON and exit
 qwatch init [DIRECTORY]   look at a directory and write a starter config
+qwatch init --output PATH  write it somewhere else, to share with a team
+qwatch init --print        show it without writing anything
 ```
 
 Listing is a flag rather than a subcommand because it modifies the same
@@ -400,20 +402,3 @@ src/
   ui/render.rs rows -> frame
   ui/theme.rs  colours
 ```
-
-## Prior art in the author's own hands
-
-This is the third go at the same itch. An earlier Go TUI answered it for one
-hardcoded layout, and a Neovim plugin answers it well enough that it remains the
-author's daily driver and is deliberately left alone rather than folded in here.
-
-The plugin keeps its zero-dependency install, which is worth more to it than
-sharing code with a compiled binary would be. Roughly two hundred lines of
-domain logic are duplicated between them, kept honest by fixtures of the same
-shape rather than by a shared library.
-
-One thing that go-around settled: an open question there was how to tell a file
-that finished from one that was merely deleted. Under this model a profile that
-declares a finished state makes completion observable, and one that does not
-gets ambiguity, honestly, because with no such directory the information is not
-on disk to be had.

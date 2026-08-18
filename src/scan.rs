@@ -1,7 +1,7 @@
 use crate::config::{Ignore, Profile, State, in_display_order};
 use crate::name::{Captures, DirTemplate, ROOT_QUEUE};
 use crate::status::{self, Resolved};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -54,7 +54,14 @@ impl Queue {
 }
 
 pub fn scan(profile: &Profile) -> Result<Vec<Queue>> {
-    let directories = subdirectories(&profile.root, &profile.ignore)?;
+    let root = &profile.root;
+    if !root.exists() {
+        bail!("the queue root does not exist: {}", root.display());
+    }
+    if !root.is_dir() {
+        bail!("the queue root is not a directory: {}", root.display());
+    }
+    let directories = subdirectories(root, &profile.ignore)?;
 
     if profile.state.is_empty() && directories.is_empty() {
         return Ok(vec![whole_root(profile)]);
@@ -446,6 +453,15 @@ state = "queued"
     #[test]
     fn reports_a_root_that_does_not_exist() {
         let profile = Profile::for_directory(Path::new("/nowhere/at/all"));
-        assert!(scan(&profile).is_err());
+        let message = scan(&profile).unwrap_err().to_string();
+        assert_eq!(message, "the queue root does not exist: /nowhere/at/all");
+    }
+
+    #[test]
+    fn reports_a_root_that_is_a_file() {
+        let root = tree(&[("", &["not-a-directory"])]);
+        let profile = Profile::for_directory(&root.path().join("not-a-directory"));
+        let message = scan(&profile).unwrap_err().to_string();
+        assert!(message.starts_with("the queue root is not a directory"), "{message}");
     }
 }

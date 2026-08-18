@@ -30,13 +30,28 @@ impl Config {
     }
 
     pub fn select(&self, requested: Option<&str>) -> Result<&Profile> {
-        let name = requested
+        let Some(name) = requested
             .or(self.default_profile.as_deref())
             .or_else(|| self.only_profile_name())
-            .context("no profile requested and no default_profile set")?;
+        else {
+            bail!(
+                "no profile asked for and no default_profile set.{}",
+                self.offer()
+            );
+        };
         self.profile
             .get(name)
-            .with_context(|| format!("no profile named {name:?}"))
+            .with_context(|| format!("no profile named {name:?}.{}", self.offer()))
+    }
+
+    fn offer(&self) -> String {
+        match self.profile.is_empty() {
+            true => " the config file declares none".to_string(),
+            false => format!(
+                " try one of: {}",
+                self.profile.keys().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        }
     }
 
     fn only_profile_name(&self) -> Option<&str> {
@@ -547,7 +562,26 @@ dir = "failed"
     fn defaults_to_the_only_profile_when_none_is_named() {
         let config = parse(INGEST).unwrap();
         assert_eq!(config.select(None).unwrap().state.len(), 2);
-        assert!(config.select(Some("missing")).is_err());
+    }
+
+    #[test]
+    fn says_which_profiles_exist_when_the_asked_for_one_does_not() {
+        let config = parse(INGEST).unwrap();
+        let message = config.select(Some("missing")).unwrap_err().to_string();
+        assert!(message.contains("missing"), "{message}");
+        assert!(message.contains("ingest"), "{message}");
+    }
+
+    #[test]
+    fn says_which_profiles_exist_when_none_was_asked_for() {
+        let two = format!("{}\n[profile.other]\nroot = \"/tmp\"\n", INGEST);
+        let message = parse(&two)
+            .unwrap()
+            .select(None)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("ingest"), "{message}");
+        assert!(message.contains("other"), "{message}");
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub struct App {
     pub prompt: Option<Prompt>,
     pub message: Option<String>,
     pub help: bool,
+    pub help_scroll: u16,
     pub theme: Theme,
     pub now: SystemTime,
     pub list_state: ListState,
@@ -71,6 +72,7 @@ impl App {
             prompt: None,
             message: None,
             help: false,
+            help_scroll: 0,
             theme: Theme::default(),
             now: SystemTime::now(),
             list_state: ListState::default(),
@@ -227,7 +229,14 @@ impl App {
             return;
         }
         if self.help {
-            self.help = false;
+            match self.profile.keys.motion_for(key) {
+                Some(Motion::Down) => self.help_scroll = self.help_scroll.saturating_add(1),
+                Some(Motion::Up) => self.help_scroll = self.help_scroll.saturating_sub(1),
+                _ => {
+                    self.help = false;
+                    self.help_scroll = 0;
+                }
+            }
             return;
         }
 
@@ -688,6 +697,64 @@ label   = "id"
 
         app.on_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         assert_ne!(app.cursor, before);
+    }
+
+    #[test]
+    fn survives_being_drawn_into_a_cramped_terminal() {
+        let (_root, mut app) = fixture();
+        for (width, height) in [(1, 1), (2, 2), (5, 3), (20, 4), (40, 6), (200, 60)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render::draw(frame, &mut app))
+                .unwrap_or_else(|_| panic!("failed to draw at {width}x{height}"));
+        }
+    }
+
+    #[test]
+    fn survives_the_overlays_in_a_cramped_terminal() {
+        let (_root, mut app) = fixture();
+        app.help = true;
+        for (width, height) in [(1, 1), (4, 2), (20, 5), (60, 8)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render::draw(frame, &mut app))
+                .unwrap_or_else(|_| panic!("help failed to draw at {width}x{height}"));
+        }
+    }
+
+    #[test]
+    fn the_help_scrolls_when_it_cannot_all_fit() {
+        let (_root, mut app) = fixture();
+        app.help = true;
+
+        let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+        let text = as_text(terminal.backend().buffer());
+        assert!(text.contains("to scroll"), "no hint that there is more:\n{text}");
+
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.help_scroll, 1);
+        assert!(app.help, "scrolling should not close the help");
+
+        app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(!app.help);
+        assert_eq!(app.help_scroll, 0);
+    }
+
+    #[test]
+    fn a_long_confirmation_wraps_rather_than_being_cut_off() {
+        let (_root, mut app) = fixture();
+        app.cursor = table::first_file(&app.rows).unwrap() + 1;
+        let restart = app
+            .action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .unwrap();
+        app.begin(&restart);
+
+        let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+        let text = as_text(terminal.backend().buffer());
+
+        assert!(text.contains("x_ExtractTotals-1.txt"), "tail of the prompt was lost:\n{text}");
     }
 
     #[test]

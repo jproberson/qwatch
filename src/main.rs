@@ -51,14 +51,23 @@ enum Command {
         /// Print the config instead of writing it to a file
         #[arg(long)]
         print: bool,
+
+        /// Write the config here instead of the default location
+        #[arg(short, long, value_name = "PATH")]
+        output: Option<PathBuf>,
     },
 }
 
 fn main() -> Result<()> {
     let options = Options::parse();
 
-    if let Some(Command::Init { directory, print }) = options.command {
-        return write_starter_config(directory, print);
+    if let Some(Command::Init {
+        directory,
+        print,
+        output,
+    }) = options.command
+    {
+        return write_starter_config(directory, print, output);
     }
 
     let profile = chosen_profile(&options)?;
@@ -112,7 +121,11 @@ fn print_listing(queues: &[Queue]) {
     }
 }
 
-fn write_starter_config(directory: Option<PathBuf>, print: bool) -> Result<()> {
+fn write_starter_config(
+    directory: Option<PathBuf>,
+    print: bool,
+    output: Option<PathBuf>,
+) -> Result<()> {
     let root = init::resolve(directory)?;
     let layout = init::detect(&root)?;
     let name = init::suggested_name(&root);
@@ -125,7 +138,11 @@ fn write_starter_config(directory: Option<PathBuf>, print: bool) -> Result<()> {
         return Ok(());
     }
 
-    let path = config::default_config_path().context("cannot find a home directory")?;
+    let elsewhere = output.is_some();
+    let path = match output {
+        Some(given) => config::expand_home(&given.to_string_lossy()),
+        None => config::default_config_path().context("cannot find a home directory")?,
+    };
     if path.exists() {
         eprintln!("\n{} already exists, so here is the config instead:\n", path.display());
         print!("{text}");
@@ -137,7 +154,10 @@ fn write_starter_config(directory: Option<PathBuf>, print: bool) -> Result<()> {
     }
     std::fs::write(&path, &text)?;
     eprintln!("\nwrote {}", path.display());
-    eprintln!("run `qwatch` to browse it, or `qwatch --profile {name}`");
+    match elsewhere {
+        true => eprintln!("run `qwatch --config {}` to browse it", path.display()),
+        false => eprintln!("run `qwatch` to browse it, or `qwatch --profile {name}`"),
+    }
     Ok(())
 }
 
