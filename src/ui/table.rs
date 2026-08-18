@@ -136,7 +136,11 @@ pub fn step(rows: &[Row], cursor: usize, delta: isize) -> Option<usize> {
     let current = files
         .iter()
         .position(|&position| position == cursor)
-        .unwrap_or_else(|| files.partition_point(|&position| position < cursor).min(last));
+        .unwrap_or_else(|| {
+            files
+                .partition_point(|&position| position < cursor)
+                .min(last)
+        });
     let moved = (current as isize + delta).clamp(0, last as isize) as usize;
     Some(files[moved])
 }
@@ -205,7 +209,10 @@ label    = "{job}"
             let mut profile: Profile = toml::from_str(PROFILE).unwrap();
             profile.validate().unwrap();
             profile.root = root.path().to_path_buf();
-            Self { _root: root, profile }
+            Self {
+                _root: root,
+                profile,
+            }
         }
 
         fn rows(&self, order: Order) -> Vec<Row> {
@@ -228,7 +235,10 @@ label    = "{job}"
             ("invoices", &[]),
             ("invoices-failed", &[]),
             ("receipts", &["x_RenderReport-0.txt"]),
-            ("receipts-failed", &["x_ParseInvoice-0.txt", "3_ExtractTotals-1.txt"]),
+            (
+                "receipts-failed",
+                &["x_ParseInvoice-0.txt", "3_ExtractTotals-1.txt"],
+            ),
         ])
     }
 
@@ -307,7 +317,10 @@ label    = "{job}"
     #[test]
     fn stepping_stops_at_the_ends_instead_of_wrapping() {
         let rows = populated().rows(Order::Queue);
-        assert_eq!(step(&rows, first_file(&rows).unwrap(), -1), first_file(&rows));
+        assert_eq!(
+            step(&rows, first_file(&rows).unwrap(), -1),
+            first_file(&rows)
+        );
         assert_eq!(step(&rows, last_file(&rows).unwrap(), 1), last_file(&rows));
     }
 
@@ -323,7 +336,10 @@ label    = "{job}"
     #[test]
     fn a_page_jump_moves_by_many_files_at_once() {
         let rows = populated().rows(Order::Queue);
-        assert_eq!(step(&rows, first_file(&rows).unwrap(), 100), last_file(&rows));
+        assert_eq!(
+            step(&rows, first_file(&rows).unwrap(), 100),
+            last_file(&rows)
+        );
     }
 
     #[test]

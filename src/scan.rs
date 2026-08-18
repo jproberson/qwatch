@@ -150,8 +150,7 @@ fn derived_states(directories: &[String]) -> Result<Vec<State>> {
 }
 
 fn subdirectories(root: &Path, ignore: &Ignore) -> Result<Vec<String>> {
-    let listing =
-        std::fs::read_dir(root).with_context(|| format!("reading {}", root.display()))?;
+    let listing = std::fs::read_dir(root).with_context(|| format!("reading {}", root.display()))?;
     let mut found: Vec<String> = listing
         .flatten()
         .filter(|item| item.file_type().is_ok_and(|kind| kind.is_dir()))
@@ -190,7 +189,10 @@ fn build_entry(path: PathBuf, profile: &Profile, queue: &str, state: &str) -> Op
         .as_ref()
         .and_then(|filename| filename.pattern.captures(&file_name));
     let (label, detail) = describe(profile, &file_name, captures.as_ref());
-    let Resolved { name: status, badge } = status::resolve(profile, state, captures.as_ref());
+    let Resolved {
+        name: status,
+        badge,
+    } = status::resolve(profile, state, captures.as_ref());
 
     Some(Entry {
         file_name,
@@ -413,10 +415,7 @@ state = "queued"
 
     #[test]
     fn treats_every_subdirectory_as_a_state_when_no_profile_declares_any() {
-        let root = tree(&[
-            ("inbox", &["one.json"]),
-            ("failed", &["two.json"]),
-        ]);
+        let root = tree(&[("inbox", &["one.json"]), ("failed", &["two.json"])]);
         let queues = scan(&Profile::for_directory(root.path())).unwrap();
 
         assert_eq!(queues.len(), 1);
@@ -462,6 +461,9 @@ state = "queued"
         let root = tree(&[("", &["not-a-directory"])]);
         let profile = Profile::for_directory(&root.path().join("not-a-directory"));
         let message = scan(&profile).unwrap_err().to_string();
-        assert!(message.starts_with("the queue root is not a directory"), "{message}");
+        assert!(
+            message.starts_with("the queue root is not a directory"),
+            "{message}"
+        );
     }
 }

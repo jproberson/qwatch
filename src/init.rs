@@ -38,8 +38,7 @@ pub fn detect(root: &Path) -> Result<Layout> {
 }
 
 fn subdirectories(root: &Path) -> Result<Vec<String>> {
-    let listing = std::fs::read_dir(root)
-        .with_context(|| format!("reading {}", root.display()))?;
+    let listing = std::fs::read_dir(root).with_context(|| format!("reading {}", root.display()))?;
     let mut found: Vec<String> = listing
         .flatten()
         .filter(|item| item.file_type().is_ok_and(|kind| kind.is_dir()))
@@ -69,7 +68,15 @@ fn common_suffix(directories: &[String]) -> Option<String> {
 }
 
 const ATTENTION: [&str; 9] = [
-    "fail", "error", "dead", "reject", "quarantine", "poison", "stuck", "retry", "invalid",
+    "fail",
+    "error",
+    "dead",
+    "reject",
+    "quarantine",
+    "poison",
+    "stuck",
+    "retry",
+    "invalid",
 ];
 
 pub fn wants_attention(state: &str) -> bool {
@@ -86,8 +93,8 @@ fn state_name(suffix: &str) -> String {
 }
 
 fn first_file(root: &Path, directories: &[String]) -> Option<String> {
-    let places = std::iter::once(root.to_path_buf())
-        .chain(directories.iter().map(|name| root.join(name)));
+    let places =
+        std::iter::once(root.to_path_buf()).chain(directories.iter().map(|name| root.join(name)));
 
     for place in places {
         let Ok(listing) = std::fs::read_dir(&place) else {
@@ -106,17 +113,28 @@ fn first_file(root: &Path, directories: &[String]) -> Option<String> {
 }
 
 pub fn suggested_name(root: &Path) -> String {
-    root.file_name()
+    let raw = root
+        .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "queues".to_string())
+        .unwrap_or_default();
+
+    let mut name = String::new();
+    for character in raw.chars() {
+        match character.is_ascii_alphanumeric() || character == '_' {
+            true => name.push(character),
+            false if name.ends_with('-') => {}
+            false => name.push('-'),
+        }
+    }
+    let trimmed = name.trim_matches('-');
+    match trimmed.is_empty() {
+        true => "queues".to_string(),
+        false => trimmed.to_string(),
+    }
 }
 
 pub fn config_text(layout: &Layout, name: &str) -> String {
-    let mut out = format!(
-        "[profile.{name}]\nroot = \"{}\"\n",
-        shortened(&layout.root)
-    );
+    let mut out = format!("[profile.{name}]\nroot = \"{}\"\n", shortened(&layout.root));
 
     match &layout.suffix {
         Some(suffix) => {
@@ -269,7 +287,10 @@ mod tests {
     #[test]
     fn picks_up_a_sample_filename_to_show_the_reader() {
         let root = tree(&["inbox"], &[("inbox", "x_Job-1.txt")]);
-        assert_eq!(detect(root.path()).unwrap().sample.as_deref(), Some("x_Job-1.txt"));
+        assert_eq!(
+            detect(root.path()).unwrap().sample.as_deref(),
+            Some("x_Job-1.txt")
+        );
     }
 
     #[test]
@@ -346,5 +367,29 @@ mod tests {
     #[test]
     fn names_a_profile_after_its_directory() {
         assert_eq!(suggested_name(Path::new("/tmp/ingest")), "ingest");
+        assert_eq!(suggested_name(Path::new("/tmp/queue_two")), "queue_two");
+    }
+
+    #[test]
+    fn beats_a_directory_name_into_something_toml_accepts_as_a_key() {
+        assert_eq!(suggested_name(Path::new("/tmp/.tmpAb12")), "tmpAb12");
+        assert_eq!(suggested_name(Path::new("/tmp/queue.v2")), "queue-v2");
+        assert_eq!(suggested_name(Path::new("/tmp/my queues")), "my-queues");
+        assert_eq!(suggested_name(Path::new("/tmp/a  b")), "a-b");
+        assert_eq!(suggested_name(Path::new("/")), "queues");
+        assert_eq!(suggested_name(Path::new("/tmp/...")), "queues");
+    }
+
+    #[test]
+    fn writes_loadable_config_however_odd_the_directory_is_called() {
+        for awkward in [".hidden", "queue.v2", "with space", "-leading"] {
+            let root = TempDir::new().unwrap();
+            let directory = root.path().join(awkward);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::create_dir(directory.join("pending")).unwrap();
+
+            let layout = detect(&directory).unwrap();
+            parsed(&config_text(&layout, &suggested_name(&directory)));
+        }
     }
 }

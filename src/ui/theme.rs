@@ -21,7 +21,11 @@ impl Theme {
     }
 
     fn paint(self, style: Style) -> Style {
-        if self.colored { style } else { Style::default() }
+        if self.colored {
+            style
+        } else {
+            Style::default()
+        }
     }
 
     pub fn border(self) -> Style {

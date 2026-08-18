@@ -40,10 +40,7 @@ impl NameTemplate {
                     if !literal.is_empty() {
                         segments.push(Segment::Literal(std::mem::take(&mut literal)));
                     }
-                    segments.push(Segment::Capture(read_placeholder(
-                        &mut characters,
-                        source,
-                    )?));
+                    segments.push(Segment::Capture(read_placeholder(&mut characters, source)?));
                 }
                 '}' => bail!("unmatched }} in template {source:?}"),
                 character => literal.push(character),
@@ -126,9 +123,9 @@ impl DirTemplate {
                 Segment::Capture(name) if name != QUEUE_PLACEHOLDER => bail!(
                     "a state directory may only use {{{QUEUE_PLACEHOLDER}}}, found {{{name}}} in {source:?}"
                 ),
-                Segment::Capture(_) if per_queue => bail!(
-                    "a state directory may only use {{{QUEUE_PLACEHOLDER}}} once: {source:?}"
-                ),
+                Segment::Capture(_) if per_queue => {
+                    bail!("a state directory may only use {{{QUEUE_PLACEHOLDER}}} once: {source:?}")
+                }
                 Segment::Capture(_) => per_queue = true,
             }
         }
@@ -274,7 +271,10 @@ mod tests {
     fn reads_the_queue_out_of_a_bare_directory() {
         let template = DirTemplate::parse("{queue}").unwrap();
         assert_eq!(template.queue_of("invoices"), Some("invoices"));
-        assert_eq!(template.queue_of("invoices-failed"), Some("invoices-failed"));
+        assert_eq!(
+            template.queue_of("invoices-failed"),
+            Some("invoices-failed")
+        );
     }
 
     #[test]
@@ -302,7 +302,9 @@ mod tests {
             "invoices-failed"
         );
         assert_eq!(
-            DirTemplate::parse("failed").unwrap().directory_for("ignored"),
+            DirTemplate::parse("failed")
+                .unwrap()
+                .directory_for("ignored"),
             "failed"
         );
     }
@@ -328,8 +330,7 @@ mod tests {
             r"^(?<claim>[\dxX])_(?<source>\w+)_(?<stamp>.+)-(?<job>[A-Za-z][\w.]*)-(?<index>\d+)\.txt$",
         )
         .unwrap();
-        let template =
-            NameTemplate::parse("{claim}_{source}_{stamp}-{job}-{index}.txt").unwrap();
+        let template = NameTemplate::parse("{claim}_{source}_{stamp}-{job}-{index}.txt").unwrap();
         let original = "3_worker_2026-08-05T23_42_168340860-05_00-ParseInvoice-1.txt";
 
         let mut found = pattern.captures(original).unwrap();

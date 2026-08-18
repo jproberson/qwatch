@@ -135,7 +135,10 @@ fn as_json(contents: &str) -> Vec<Line> {
             .map(text)
             .collect(),
         Err(error) => {
-            let mut lines = vec![Line::Notice(format!("not valid JSON: {error}")), Line::Blank];
+            let mut lines = vec![
+                Line::Notice(format!("not valid JSON: {error}")),
+                Line::Blank,
+            ];
             lines.extend(contents.lines().map(text));
             lines
         }
@@ -251,10 +254,7 @@ label   = "id"
         let lines = render(&Preview::default(), "one\ntwo");
         assert_eq!(
             lines,
-            [
-                Line::Text("one".to_string()),
-                Line::Text("two".to_string())
-            ]
+            [Line::Text("one".to_string()), Line::Text("two".to_string())]
         );
     }
 

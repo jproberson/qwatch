@@ -122,7 +122,11 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
             };
             Line::from(vec![
                 Span::styled(
-                    format!(" {:width$} ", truncated(&entry.queue, widths.queue), width = widths.queue),
+                    format!(
+                        " {:width$} ",
+                        truncated(&entry.queue, widths.queue),
+                        width = widths.queue
+                    ),
                     app.theme.queue(),
                 ),
                 Span::styled(
@@ -130,16 +134,28 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
                     app.theme.status(app.color_of(&entry.status)),
                 ),
                 Span::styled(
-                    entry.badge.as_ref().map(|badge| format!(" {badge}")).unwrap_or_default(),
+                    entry
+                        .badge
+                        .as_ref()
+                        .map(|badge| format!(" {badge}"))
+                        .unwrap_or_default(),
                     app.theme.badge(),
                 ),
                 Span::raw(" ".repeat(status_padding(entry, widths.status))),
                 Span::styled(
-                    format!("{:width$} ", truncated(&job, widths.job), width = widths.job),
+                    format!(
+                        "{:width$} ",
+                        truncated(&job, widths.job),
+                        width = widths.job
+                    ),
                     app.theme.job(),
                 ),
                 Span::styled(
-                    format!("{:>width$}", age(entry.modified, app.now), width = AGE_WIDTH),
+                    format!(
+                        "{:>width$}",
+                        age(entry.modified, app.now),
+                        width = AGE_WIDTH
+                    ),
                     app.theme.muted(),
                 ),
             ])
@@ -148,7 +164,10 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
 }
 
 fn status_padding(entry: &crate::scan::Entry, width: usize) -> usize {
-    let badge = entry.badge.as_ref().map_or(0, |badge| badge.chars().count() + 1);
+    let badge = entry
+        .badge
+        .as_ref()
+        .map_or(0, |badge| badge.chars().count() + 1);
     width.saturating_sub(entry.status.chars().count() + badge) + 1
 }
 
@@ -163,7 +182,11 @@ fn draw_preview(frame: &mut Frame, app: &mut App, area: Rect) {
         ));
 
     app.preview_area = block.inner(area);
-    let lines: Vec<Line> = app.preview.iter().map(|line| preview_line(app, line)).collect();
+    let lines: Vec<Line> = app
+        .preview
+        .iter()
+        .map(|line| preview_line(app, line))
+        .collect();
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -195,7 +218,11 @@ fn footer_line(app: &App) -> Line<'static> {
         parts.push(format!("{} {}", action.key, action.name));
     }
     parts.push(format!("{} rescan", first_of(&keys.rescan)));
-    parts.push(format!("{} sort:{}", first_of(&keys.sort), app.order.label()));
+    parts.push(format!(
+        "{} sort:{}",
+        first_of(&keys.sort),
+        app.order.label()
+    ));
     parts.push(format!("{} help", first_of(&keys.help)));
     parts.push(format!("{} quit", first_of(&keys.quit)));
 
@@ -244,7 +271,11 @@ fn draw_overlay(
     lines: Vec<Line<'static>>,
     scroll: u16,
 ) {
-    let width = area.width.saturating_sub(area.width / 4).max(30).min(area.width);
+    let width = area
+        .width
+        .saturating_sub(area.width / 4)
+        .max(30)
+        .min(area.width);
     let inner = width.saturating_sub(4).max(1) as usize;
     let wrapped: usize = lines
         .iter()
@@ -265,9 +296,8 @@ fn draw_overlay(
         .padding(Padding::horizontal(1))
         .title(format!(" {title} "));
     if hidden > 0 {
-        block = block.title_bottom(
-            Line::from(format!(" {} more, j/k to scroll ", hidden)).right_aligned(),
-        );
+        block = block
+            .title_bottom(Line::from(format!(" {} more, j/k to scroll ", hidden)).right_aligned());
     }
 
     frame.render_widget(Clear, popup);
@@ -304,9 +334,10 @@ impl Widths {
         widths.status = widths.status.min(STATUS_CAP);
 
         let spent = 5 + widths.queue + widths.status + AGE_WIDTH;
-        widths.job = available
-            .saturating_sub(spent)
-            .clamp(3, widths.job.min(JOB_CAP).max(available.saturating_sub(spent)));
+        widths.job = available.saturating_sub(spent).clamp(
+            3,
+            widths.job.min(JOB_CAP).max(available.saturating_sub(spent)),
+        );
         widths
     }
 }

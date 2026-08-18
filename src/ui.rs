@@ -4,13 +4,13 @@ pub mod theme;
 
 use crate::action::{self, Change, Plan};
 use crate::config::{Action, Profile, StatusColor};
+use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::scan::{self, Entry, Queue};
 use crate::ui::table::{Order, Row};
 use crate::ui::theme::Theme;
 use crate::watch;
 use anyhow::Result;
-use crate::keys::{Binding, Motion};
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -31,6 +31,7 @@ pub struct Prompt {
 
 pub struct App {
     pub profile: Profile,
+    pub queues: Vec<Queue>,
     pub rows: Vec<Row>,
     pub cursor: usize,
     pub order: Order,
@@ -61,9 +62,13 @@ impl App {
             .filter_map(|action| Some((Binding::parse(&action.key).ok()?, action.clone())))
             .collect();
 
-        let canonical_root = profile.root.canonicalize().unwrap_or_else(|_| profile.root.clone());
+        let canonical_root = profile
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| profile.root.clone());
         let mut app = Self {
             profile,
+            queues: Vec::new(),
             rows: Vec::new(),
             cursor: 0,
             order: Order::default(),
@@ -121,6 +126,7 @@ impl App {
     fn rebuild(&mut self, queues: Vec<Queue>) {
         let held = self.selected().map(|entry| entry.path.clone());
         self.rows = table::build(&self.profile, &queues, self.order);
+        self.queues = queues;
         self.cursor = held
             .and_then(|path| table::relocate(&self.rows, &path))
             .or_else(|| table::settle(&self.rows, self.cursor, true))
@@ -136,15 +142,14 @@ impl App {
         };
     }
 
-    pub fn rescan(&mut self) -> Result<()> {
+    pub fn rescan(&mut self) -> Result<bool> {
         self.now = SystemTime::now();
         let queues = scan::scan(&self.profile)?;
-        let rebuilt = table::build(&self.profile, &queues, self.order);
-        if rebuilt == self.rows {
-            return Ok(());
+        if table::build(&self.profile, &queues, self.order) == self.rows {
+            return Ok(false);
         }
         self.rebuild(queues);
-        Ok(())
+        Ok(true)
     }
 
     fn move_cursor(&mut self, delta: isize) {
@@ -328,7 +333,14 @@ const FINISHED: StatusColor = StatusColor::Indexed(2);
 const MUTED: StatusColor = StatusColor::Indexed(8);
 
 const FINISHED_WORDS: [&str; 8] = [
-    "done", "complete", "finish", "processed", "archive", "success", "sent", "delivered",
+    "done",
+    "complete",
+    "finish",
+    "processed",
+    "archive",
+    "success",
+    "sent",
+    "delivered",
 ];
 
 fn status_colors(profile: &Profile) -> BTreeMap<String, StatusColor> {
@@ -368,22 +380,10 @@ pub fn run(profile: Profile) -> Result<()> {
     let mut app = App::new(profile)?;
 
     loop {
-        let watch = match app.profile.watch.enabled {
-            false => None,
-            true => watch::start(
-                &watch::targets(&app.profile, &scan::scan(&app.profile)?),
-                watch::Settings {
-                    debounce: Duration::from_millis(app.profile.watch.debounce_ms),
-                    backstop: Duration::from_millis(app.profile.watch.backstop_ms),
-                },
-            )
-            .ok(),
-        };
-
         let mut terminal = ratatui::init();
-        let mouse = app.profile.mouse
-            && crossterm::execute!(std::io::stdout(), EnableMouseCapture).is_ok();
-        let outcome = pump(&mut terminal, &mut app, watch.as_ref());
+        let mouse =
+            app.profile.mouse && crossterm::execute!(std::io::stdout(), EnableMouseCapture).is_ok();
+        let outcome = pump(&mut terminal, &mut app);
         if mouse {
             let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
         }
@@ -401,12 +401,25 @@ pub fn run(profile: Profile) -> Result<()> {
     }
 }
 
-fn pump(
-    terminal: &mut ratatui::DefaultTerminal,
-    app: &mut App,
-    watch: Option<&watch::Watch>,
-) -> Result<()> {
+fn pump(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    let settings = watch::Settings {
+        debounce: Duration::from_millis(app.profile.watch.debounce_ms),
+        backstop: Duration::from_millis(app.profile.watch.backstop_ms),
+    };
+    let mut watched: Vec<PathBuf> = Vec::new();
+    let mut watch: Option<watch::Watch> = None;
+    let mut rearm = app.profile.watch.enabled;
+
     while app.running {
+        if rearm {
+            let wanted = watch::targets(&app.profile, &app.queues);
+            if wanted != watched {
+                watch = watch::start(&wanted, settings).ok();
+                watched = wanted;
+            }
+            rearm = false;
+        }
+
         terminal.draw(|frame| render::draw(frame, app))?;
 
         if event::poll(POLL)? {
@@ -416,15 +429,25 @@ fn pump(
                 _ => {}
             }
         }
-        if watch.is_some_and(|watch| watch.ticks().try_recv().is_ok()) {
-            app.rescan()?;
+        if watch
+            .as_ref()
+            .is_some_and(|watch| watch.ticks().try_recv().is_ok())
+            && app.rescan()?
+        {
+            rearm = app.profile.watch.enabled;
         }
     }
     Ok(())
 }
 
 fn edit(path: &std::path::Path) -> Result<()> {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let fallback = match cfg!(windows) {
+        true => "notepad",
+        false => "vi",
+    };
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| fallback.to_string());
     std::process::Command::new(editor).arg(path).status()?;
     Ok(())
 }
@@ -497,9 +520,21 @@ label   = "id"
         for directory in ["invoices", "invoices-failed", "receipts", "receipts-failed"] {
             std::fs::create_dir(root.path().join(directory)).unwrap();
         }
-        std::fs::write(root.path().join("receipts/x_RenderReport-0.txt"), "RenderReport,0").unwrap();
-        std::fs::write(root.path().join("receipts-failed/x_ParseInvoice-0.txt"), "ParseInvoice,0").unwrap();
-        std::fs::write(root.path().join("receipts-failed/3_ExtractTotals-1.txt"), PAYLOAD).unwrap();
+        std::fs::write(
+            root.path().join("receipts/x_RenderReport-0.txt"),
+            "RenderReport,0",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("receipts-failed/x_ParseInvoice-0.txt"),
+            "ParseInvoice,0",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("receipts-failed/3_ExtractTotals-1.txt"),
+            PAYLOAD,
+        )
+        .unwrap();
 
         let mut profile: Profile = toml::from_str(PROFILE).unwrap();
         profile.validate().unwrap();
@@ -541,7 +576,9 @@ label   = "id"
     fn renders_the_confirm_prompt() {
         let (_root, mut app) = fixture();
         app.cursor = table::first_file(&app.rows).unwrap() + 1;
-        let restart = app.action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).unwrap();
+        let restart = app
+            .action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .unwrap();
         app.begin(&restart);
         println!("\n{}\n", screen(&mut app, 92, 20));
     }
@@ -595,7 +632,12 @@ label   = "id"
         app.cursor = table::first_file(&app.rows).unwrap() + 1;
 
         let buffer = painted(&mut app);
-        let dimmed = |y: u16| buffer[(4u16, y)].style().add_modifier.contains(Modifier::DIM);
+        let dimmed = |y: u16| {
+            buffer[(4u16, y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        };
 
         assert!(!dimmed(1 + app.cursor as u16), "the selected row is dimmed");
         for other in table::file_positions(&app.rows) {
@@ -728,9 +770,14 @@ label   = "id"
         app.help = true;
 
         let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
-        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| render::draw(frame, &mut app))
+            .unwrap();
         let text = as_text(terminal.backend().buffer());
-        assert!(text.contains("to scroll"), "no hint that there is more:\n{text}");
+        assert!(
+            text.contains("to scroll"),
+            "no hint that there is more:\n{text}"
+        );
 
         app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         assert_eq!(app.help_scroll, 1);
@@ -751,10 +798,47 @@ label   = "id"
         app.begin(&restart);
 
         let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
-        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| render::draw(frame, &mut app))
+            .unwrap();
         let text = as_text(terminal.backend().buffer());
 
-        assert!(text.contains("x_ExtractTotals-1.txt"), "tail of the prompt was lost:\n{text}");
+        assert!(
+            text.contains("x_ExtractTotals-1.txt"),
+            "tail of the prompt was lost:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_queue_that_appears_later_becomes_something_to_watch() {
+        let (root, mut app) = fixture();
+        let before = crate::watch::targets(&app.profile, &app.queues);
+
+        std::fs::create_dir(root.path().join("payroll")).unwrap();
+        std::fs::write(root.path().join("payroll/x_RunPayroll-0.txt"), "").unwrap();
+        assert!(
+            app.rescan().unwrap(),
+            "the new queue should change the list"
+        );
+
+        let after = crate::watch::targets(&app.profile, &app.queues);
+        assert!(!before.contains(&root.path().join("payroll")));
+        assert!(
+            after.contains(&root.path().join("payroll")),
+            "a queue that appeared while running is never watched"
+        );
+    }
+
+    #[test]
+    fn a_rescan_reports_whether_anything_actually_changed() {
+        let (root, mut app) = fixture();
+        assert!(
+            !app.rescan().unwrap(),
+            "nothing changed but rescan said it did"
+        );
+
+        std::fs::write(root.path().join("receipts/x_NewJob-9.txt"), "").unwrap();
+        assert!(app.rescan().unwrap(), "a new file should count as a change");
     }
 
     #[test]
@@ -768,7 +852,9 @@ label   = "id"
     fn a_refused_action_reports_instead_of_acting() {
         let (_root, mut app) = fixture();
         app.cursor = table::last_file(&app.rows).unwrap();
-        let restart = app.action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).unwrap();
+        let restart = app
+            .action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .unwrap();
         app.begin(&restart);
 
         assert!(app.prompt.is_none());
@@ -779,26 +865,39 @@ label   = "id"
     fn confirming_a_restart_moves_the_file_and_keeps_it_selected() {
         let (root, mut app) = fixture();
         app.cursor = table::first_file(&app.rows).unwrap() + 1;
-        let restart = app.action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).unwrap();
+        let restart = app
+            .action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .unwrap();
         app.begin(&restart);
 
         assert!(app.prompt.is_some());
         app.answer(KeyCode::Char('y'));
 
         assert!(root.path().join("receipts/x_ExtractTotals-1.txt").exists());
-        assert!(!root.path().join("receipts-failed/3_ExtractTotals-1.txt").exists());
+        assert!(
+            !root
+                .path()
+                .join("receipts-failed/3_ExtractTotals-1.txt")
+                .exists()
+        );
     }
 
     #[test]
     fn declining_a_prompt_changes_nothing() {
         let (root, mut app) = fixture();
         app.cursor = table::first_file(&app.rows).unwrap() + 1;
-        let restart = app.action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).unwrap();
+        let restart = app
+            .action_for(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .unwrap();
         app.begin(&restart);
         app.answer(KeyCode::Char('n'));
 
         assert!(app.prompt.is_none());
-        assert!(root.path().join("receipts-failed/3_ExtractTotals-1.txt").exists());
+        assert!(
+            root.path()
+                .join("receipts-failed/3_ExtractTotals-1.txt")
+                .exists()
+        );
     }
 
     #[test]
@@ -898,8 +997,14 @@ dir  = "done"
     #[test]
     fn a_colour_can_be_named_numbered_or_written_in_hex() {
         assert_eq!(StatusColor::parse("red").unwrap(), StatusColor::Indexed(1));
-        assert_eq!(StatusColor::parse("Orange").unwrap(), StatusColor::Indexed(208));
-        assert_eq!(StatusColor::parse("215").unwrap(), StatusColor::Indexed(215));
+        assert_eq!(
+            StatusColor::parse("Orange").unwrap(),
+            StatusColor::Indexed(208)
+        );
+        assert_eq!(
+            StatusColor::parse("215").unwrap(),
+            StatusColor::Indexed(215)
+        );
         assert_eq!(
             StatusColor::parse("#ffa07a").unwrap(),
             StatusColor::Rgb(255, 160, 122)

@@ -38,7 +38,9 @@ pub fn apply(change: &Change) -> Result<()> {
             std::fs::remove_file(path).with_context(|| format!("deleting {}", path.display()))
         }
         Change::Move { from, to } => {
-            let parent = to.parent().context("a move needs a destination directory")?;
+            let parent = to
+                .parent()
+                .context("a move needs a destination directory")?;
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
             std::fs::rename(from, to)
@@ -346,7 +348,10 @@ type = "edit"
     #[test]
     fn refuses_to_restart_a_name_it_cannot_read() {
         let fixture = Fixture::new(&[("invoices", &[]), ("invoices-failed", &["notes.txt"])]);
-        let message = fixture.plan("restart", "notes.txt").unwrap_err().to_string();
+        let message = fixture
+            .plan("restart", "notes.txt")
+            .unwrap_err()
+            .to_string();
         assert!(message.contains("not in the expected format"), "{message}");
     }
 
@@ -378,9 +383,13 @@ type = "edit"
         let fixture = Fixture::new(&[("invoices", &["x_ParseInvoice-1.txt"])]);
         let plan = fixture.plan("edit", "x_ParseInvoice-1.txt").unwrap();
         assert!(matches!(plan, Plan::Open(_)));
-        assert_eq!(plan.describe(fixture.root.path()), "open x_ParseInvoice-1.txt");
+        assert_eq!(
+            plan.describe(fixture.root.path()),
+            "open x_ParseInvoice-1.txt"
+        );
     }
 
+    #[cfg(unix)]
     #[test]
     fn refuses_a_file_that_resolves_outside_the_root() {
         let outside = TempDir::new().unwrap();
@@ -422,7 +431,10 @@ type = "edit"
         fixture.plan("delete", "3_ParseInvoice-1.txt").unwrap();
 
         assert!(fixture.names_in("invoices").is_empty());
-        assert_eq!(fixture.names_in("invoices-failed"), ["3_ParseInvoice-1.txt"]);
+        assert_eq!(
+            fixture.names_in("invoices-failed"),
+            ["3_ParseInvoice-1.txt"]
+        );
     }
 
     #[test]

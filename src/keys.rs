@@ -222,8 +222,16 @@ mod tests {
 
     #[test]
     fn reads_a_plain_character() {
-        assert!(Binding::parse("j").unwrap().matches(press(KeyCode::Char('j'))));
-        assert!(!Binding::parse("j").unwrap().matches(press(KeyCode::Char('k'))));
+        assert!(
+            Binding::parse("j")
+                .unwrap()
+                .matches(press(KeyCode::Char('j')))
+        );
+        assert!(
+            !Binding::parse("j")
+                .unwrap()
+                .matches(press(KeyCode::Char('k')))
+        );
     }
 
     #[test]
@@ -235,9 +243,17 @@ mod tests {
 
     #[test]
     fn reads_the_named_keys() {
-        assert!(Binding::parse("enter").unwrap().matches(press(KeyCode::Enter)));
+        assert!(
+            Binding::parse("enter")
+                .unwrap()
+                .matches(press(KeyCode::Enter))
+        );
         assert!(Binding::parse("esc").unwrap().matches(press(KeyCode::Esc)));
-        assert!(Binding::parse("pagedown").unwrap().matches(press(KeyCode::PageDown)));
+        assert!(
+            Binding::parse("pagedown")
+                .unwrap()
+                .matches(press(KeyCode::PageDown))
+        );
         assert!(Binding::parse("f5").unwrap().matches(press(KeyCode::F(5))));
     }
 
@@ -262,9 +278,15 @@ mod tests {
     #[test]
     fn the_defaults_are_the_vim_ones() {
         let keys = Keys::default();
-        assert_eq!(keys.motion_for(press(KeyCode::Char('j'))), Some(Motion::Down));
+        assert_eq!(
+            keys.motion_for(press(KeyCode::Char('j'))),
+            Some(Motion::Down)
+        );
         assert_eq!(keys.motion_for(press(KeyCode::Down)), Some(Motion::Down));
-        assert_eq!(keys.motion_for(press(KeyCode::Char('G'))), Some(Motion::Last));
+        assert_eq!(
+            keys.motion_for(press(KeyCode::Char('G'))),
+            Some(Motion::Last)
+        );
         assert_eq!(keys.motion_for(press(KeyCode::Esc)), Some(Motion::Quit));
         assert_eq!(keys.motion_for(press(KeyCode::Char('z'))), None);
     }
@@ -272,7 +294,10 @@ mod tests {
     #[test]
     fn a_profile_can_rebind_a_motion() {
         let keys: Keys = toml::from_str(r#"down = ["n", "ctrl-j"]"#).unwrap();
-        assert_eq!(keys.motion_for(press(KeyCode::Char('n'))), Some(Motion::Down));
+        assert_eq!(
+            keys.motion_for(press(KeyCode::Char('n'))),
+            Some(Motion::Down)
+        );
         assert_eq!(
             keys.motion_for(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL)),
             Some(Motion::Down)

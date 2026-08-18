@@ -17,8 +17,8 @@ pub struct Config {
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let config: Self =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         for (name, profile) in &config.profile {
@@ -65,9 +65,16 @@ impl Config {
 pub fn default_config_path() -> Option<PathBuf> {
     let base = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
+        _ => home()?.join(".config"),
     };
     Some(base.join("qwatch").join("config.toml"))
+}
+
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,7 +159,9 @@ impl Profile {
         for (field, template) in templates {
             for placeholder in template.into_iter().flat_map(NameTemplate::placeholders) {
                 if !known.contains(placeholder) {
-                    bail!("filename.{field} uses {{{placeholder}}}, which the pattern never captures");
+                    bail!(
+                        "filename.{field} uses {{{placeholder}}}, which the pattern never captures"
+                    );
                 }
             }
         }
@@ -165,7 +174,10 @@ impl Profile {
             if let Some(state) = &status.state
                 && !self.declares(state)
             {
-                bail!("status {:?} names an undeclared state {state:?}", status.name);
+                bail!(
+                    "status {:?} names an undeclared state {state:?}",
+                    status.name
+                );
             }
             for capture in status.when.keys() {
                 if !known.contains(capture.as_str()) {
@@ -191,8 +203,8 @@ impl Profile {
         let known = self.capture_names();
         let mut taken: Vec<Binding> = Vec::new();
         for action in &self.action {
-            let binding = Binding::parse(&action.key)
-                .with_context(|| format!("action {:?}", action.name))?;
+            let binding =
+                Binding::parse(&action.key).with_context(|| format!("action {:?}", action.name))?;
             if self.keys.claims(binding) {
                 bail!(
                     "action {:?} binds {:?}, which is reserved for navigation",
@@ -334,9 +346,7 @@ impl StatusColor {
 }
 
 fn bad_colour(source: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "unknown colour {source:?}: use a name, a number from 0 to 255, or #rrggbb"
-    )
+    anyhow::anyhow!("unknown colour {source:?}: use a name, a number from 0 to 255, or #rrggbb")
 }
 
 impl TryFrom<String> for StatusColor {
@@ -439,10 +449,10 @@ pub fn expand_home(raw: &str) -> PathBuf {
     let Some(rest) = raw.strip_prefix('~') else {
         return PathBuf::from(raw);
     };
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = home() else {
         return PathBuf::from(raw);
     };
-    PathBuf::from(home).join(rest.trim_start_matches('/'))
+    home.join(rest.trim_start_matches(['/', '\\']))
 }
 
 #[cfg(test)]
@@ -507,11 +517,7 @@ names = [".DS_Store", ".gitkeep"]
     }
 
     fn ingest() -> Profile {
-        parse(INGEST)
-            .unwrap()
-            .profile
-            .remove("ingest")
-            .unwrap()
+        parse(INGEST).unwrap().profile.remove("ingest").unwrap()
     }
 
     #[test]
@@ -575,11 +581,7 @@ dir = "failed"
     #[test]
     fn says_which_profiles_exist_when_none_was_asked_for() {
         let two = format!("{}\n[profile.other]\nroot = \"/tmp\"\n", INGEST);
-        let message = parse(&two)
-            .unwrap()
-            .select(None)
-            .unwrap_err()
-            .to_string();
+        let message = parse(&two).unwrap().select(None).unwrap_err().to_string();
         assert!(message.contains("ingest"), "{message}");
         assert!(message.contains("other"), "{message}");
     }
@@ -638,7 +640,10 @@ dir = "failed"
 
     #[test]
     fn rejects_an_unknown_field() {
-        let broken = INGEST.replace("[[profile.ingest.state]]", "[[profile.ingest.state]]\nsuffix = \"-failed\"");
+        let broken = INGEST.replace(
+            "[[profile.ingest.state]]",
+            "[[profile.ingest.state]]\nsuffix = \"-failed\"",
+        );
         assert!(parse(&broken).is_err());
     }
 
@@ -690,7 +695,10 @@ type = "delete"
     #[test]
     fn expands_a_leading_tilde() {
         unsafe { std::env::set_var("HOME", "/home/tester") };
-        assert_eq!(expand_home("~/queues"), PathBuf::from("/home/tester/queues"));
+        assert_eq!(
+            expand_home("~/queues"),
+            PathBuf::from("/home/tester/queues")
+        );
         assert_eq!(expand_home("/absolute"), PathBuf::from("/absolute"));
     }
 }

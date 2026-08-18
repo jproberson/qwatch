@@ -31,10 +31,7 @@ pub fn resolve(profile: &Profile, state: &str, captures: Option<&Captures>) -> R
         })
 }
 
-fn usable_captures<'a>(
-    profile: &Profile,
-    captures: Option<&'a Captures>,
-) -> Option<&'a Captures> {
+fn usable_captures<'a>(profile: &Profile, captures: Option<&'a Captures>) -> Option<&'a Captures> {
     const NONE: &Captures = &Captures::new();
     match captures {
         Some(captures) => Some(captures),
@@ -44,7 +41,11 @@ fn usable_captures<'a>(
 }
 
 fn applies(status: &Status, state: &str, captures: &Captures) -> bool {
-    if status.state.as_deref().is_some_and(|wanted| wanted != state) {
+    if status
+        .state
+        .as_deref()
+        .is_some_and(|wanted| wanted != state)
+    {
         return false;
     }
     status.when.iter().all(|(capture, pattern)| {

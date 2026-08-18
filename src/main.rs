@@ -144,7 +144,10 @@ fn write_starter_config(
         None => config::default_config_path().context("cannot find a home directory")?,
     };
     if path.exists() {
-        eprintln!("\n{} already exists, so here is the config instead:\n", path.display());
+        eprintln!(
+            "\n{} already exists, so here is the config instead:\n",
+            path.display()
+        );
         print!("{text}");
         return Ok(());
     }
