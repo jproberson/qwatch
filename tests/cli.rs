@@ -148,3 +148,69 @@ fn refuses_a_config_it_cannot_make_sense_of() {
     assert!(!output.status.success());
     assert!(text(&output.stderr).contains("mystery"));
 }
+
+#[test]
+fn a_closed_pipe_is_not_an_error() {
+    let root = TempDir::new().unwrap();
+    let queue = root.path().join("bulk");
+    std::fs::create_dir(&queue).unwrap();
+    for at in 0..6000 {
+        std::fs::write(
+            queue.join(format!("a_long_enough_filename_to_fill_a_pipe_{at}.txt")),
+            "",
+        )
+        .unwrap();
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_qwatch"))
+        .args(["--list", &as_str(root.path())])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    drop(child.stdout.take());
+    let finished = child.wait_with_output().unwrap();
+
+    assert!(
+        finished.status.success(),
+        "a closed pipe should not be a failure: {}",
+        text(&finished.stderr)
+    );
+    assert!(!text(&finished.stderr).contains("panicked"));
+}
+
+#[test]
+fn asking_for_the_browser_without_a_terminal_explains_itself() {
+    let root = queue_tree();
+    let output = qwatch(&[&as_str(root.path())]);
+
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("needs a terminal"));
+    assert!(!text(&output.stderr).contains("panicked"));
+}
+
+#[test]
+fn listing_and_json_cannot_both_be_asked_for() {
+    let root = queue_tree();
+    let output = qwatch(&["--list", "--json", &as_str(root.path())]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(text(&output.stderr).contains("cannot be used with"));
+}
+
+#[test]
+fn it_can_describe_itself_to_a_shell() {
+    for shell in ["bash", "zsh", "fish"] {
+        let output = qwatch(&["completions", shell]);
+        assert!(output.status.success(), "no completions for {shell}");
+        assert!(text(&output.stdout).contains("qwatch"));
+    }
+}
+
+#[test]
+fn the_help_shows_how_to_actually_use_it() {
+    let help = text(&qwatch(&["--help"]).stdout);
+    assert!(help.contains("Examples:"));
+    assert!(help.contains("qwatch --json"));
+}

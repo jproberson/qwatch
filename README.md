@@ -161,6 +161,12 @@ cargo install --path .
 Then `qwatch init <your queue directory>` to write a starting config, and
 `qwatch` to browse it.
 
+For tab completion:
+
+```
+qwatch completions zsh  > ~/.zfunc/_qwatch          # or bash, fish, elvish, powershell
+```
+
 ## Build
 
 ```

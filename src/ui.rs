@@ -734,20 +734,16 @@ fn refusal_lines(batch: &action::Batch) -> Vec<String> {
     lines
 }
 
-pub fn run(
-    profile: Profile,
-    catalogue: BTreeMap<String, Profile>,
-    name: String,
-    book_path: Option<PathBuf>,
-) -> Result<()> {
-    let book = book_path.as_deref().map(Book::read).unwrap_or_default();
-    let remembered = book.of(&name);
+pub fn run(chosen: crate::Chosen) -> Result<()> {
+    let book = chosen.book.as_deref().map(Book::read).unwrap_or_default();
+    let remembered = book.of(&chosen.name);
 
-    let mut app = App::new(recalled(profile, &remembered))?;
-    app.catalogue = catalogue;
-    app.name = name;
+    let mut app = App::new(recalled(chosen.profile, &remembered))?;
+    app.theme = Theme::painting(chosen.colored);
+    app.catalogue = chosen.catalogue;
+    app.name = chosen.name;
     app.book = book;
-    app.book_path = book_path;
+    app.book_path = chosen.book;
     if let Some(layout) = remembered.layout {
         app.layout = layout;
     }

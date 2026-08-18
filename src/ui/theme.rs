@@ -8,16 +8,18 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self {
-            colored: std::env::var_os("NO_COLOR").is_none(),
-        }
+        Self::painting(std::env::var_os("NO_COLOR").is_none())
     }
 }
 
 impl Theme {
+    pub fn painting(colored: bool) -> Self {
+        Self { colored }
+    }
+
     #[cfg(test)]
     pub fn plain() -> Self {
-        Self { colored: false }
+        Self::painting(false)
     }
 
     fn paint(self, style: Style) -> Style {

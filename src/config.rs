@@ -507,10 +507,14 @@ fn expanded_path<'de, D: Deserializer<'de>>(deserializer: D) -> Result<PathBuf, 
 }
 
 pub fn expand_home(raw: &str) -> PathBuf {
+    expand_from(raw, home())
+}
+
+fn expand_from(raw: &str, home: Option<PathBuf>) -> PathBuf {
     let Some(rest) = raw.strip_prefix('~') else {
         return PathBuf::from(raw);
     };
-    let Some(home) = home() else {
+    let Some(home) = home else {
         return PathBuf::from(raw);
     };
     home.join(rest.trim_start_matches(['/', '\\']))
@@ -755,11 +759,17 @@ type = "delete"
 
     #[test]
     fn expands_a_leading_tilde() {
-        unsafe { std::env::set_var("HOME", "/home/tester") };
+        let home = || Some(PathBuf::from("/home/tester"));
         assert_eq!(
-            expand_home("~/queues"),
+            expand_from("~/queues", home()),
             PathBuf::from("/home/tester/queues")
         );
-        assert_eq!(expand_home("/absolute"), PathBuf::from("/absolute"));
+        assert_eq!(expand_from("~", home()), PathBuf::from("/home/tester"));
+        assert_eq!(expand_from("/absolute", home()), PathBuf::from("/absolute"));
+    }
+
+    #[test]
+    fn leaves_a_tilde_alone_when_there_is_no_home_to_expand_it_to() {
+        assert_eq!(expand_from("~/queues", None), PathBuf::from("~/queues"));
     }
 }

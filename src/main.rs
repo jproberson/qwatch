@@ -13,14 +13,29 @@ mod ui;
 mod watch;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use config::{Config, Profile};
 use scan::Queue;
 use std::collections::BTreeMap;
+use std::io::{ErrorKind, IsTerminal, Write};
 use std::path::PathBuf;
 
+const EXAMPLES: &str = "\
+Examples:
+  qwatch                          browse the default profile
+  qwatch ~/queues                 browse a directory with no config at all
+  qwatch --profile ingest         browse a named profile
+  qwatch --list | grep failed     one line per file, for grepping
+  qwatch --json | jq '.[].name'   the same thing, structured
+  qwatch init ~/queues            work out a config and write it
+";
+
 #[derive(Parser)]
-#[command(version, about = "Browse and unstick file-based work queues")]
+#[command(
+    version,
+    about = "Browse and unstick file-based work queues",
+    after_help = EXAMPLES
+)]
 struct Options {
     /// Directory to browse, instead of a profile from the config file
     directory: Option<PathBuf>,
@@ -38,8 +53,12 @@ struct Options {
     list: bool,
 
     /// List every file as JSON and exit
-    #[arg(long)]
+    #[arg(long, conflicts_with = "list")]
     json: bool,
+
+    /// Never colour the output, the same as setting NO_COLOR
+    #[arg(long)]
+    no_color: bool,
 
     #[command(subcommand)]
     command: Option<Command>,
@@ -60,39 +79,49 @@ enum Command {
         #[arg(short, long, value_name = "PATH")]
         output: Option<PathBuf>,
     },
+
+    /// Print a completion script for your shell
+    Completions {
+        /// bash, zsh, fish, elvish or powershell
+        shell: clap_complete::Shell,
+    },
 }
 
 fn main() -> Result<()> {
     let options = Options::parse();
 
-    if let Some(Command::Init {
-        directory,
-        print,
-        output,
-    }) = options.command
-    {
-        return write_starter_config(directory, print, output);
+    match options.command {
+        Some(Command::Init {
+            directory,
+            print,
+            output,
+        }) => return write_starter_config(directory, print, output),
+        Some(Command::Completions { shell }) => return print_completions(shell),
+        None => {}
     }
 
     let chosen = chosen_profile(&options)?;
     let queues = scan::scan(&chosen.profile)?;
 
     if options.json {
-        println!("{}", serde_json::to_string_pretty(&queues)?);
-        return Ok(());
+        let rendered = serde_json::to_string_pretty(&queues)?;
+        return to_stdout(|out| writeln!(out, "{rendered}"));
     }
     if options.list {
-        print_listing(&queues);
-        return Ok(());
+        return to_stdout(|out| print_listing(out, &queues));
     }
-    ui::run(chosen.profile, chosen.catalogue, chosen.name, chosen.book)
+    if !std::io::stdout().is_terminal() {
+        bail!("the browser needs a terminal. Use --list or --json to send output elsewhere");
+    }
+    ui::run(chosen)
 }
 
-struct Chosen {
-    profile: Profile,
-    catalogue: BTreeMap<String, Profile>,
-    name: String,
-    book: Option<PathBuf>,
+pub struct Chosen {
+    pub profile: Profile,
+    pub catalogue: BTreeMap<String, Profile>,
+    pub name: String,
+    pub book: Option<PathBuf>,
+    pub colored: bool,
 }
 
 fn chosen_profile(options: &Options) -> Result<Chosen> {
@@ -104,6 +133,7 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
             book: config::default_config_path()
                 .as_deref()
                 .map(remember::beside),
+            colored: wants_colour(options),
         });
     }
 
@@ -131,24 +161,48 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
         catalogue: config.profile,
         name,
         book: Some(remember::beside(&path)),
+        colored: wants_colour(options),
     })
 }
 
-fn print_listing(queues: &[Queue]) {
+fn wants_colour(options: &Options) -> bool {
+    !options.no_color && std::env::var_os("NO_COLOR").is_none()
+}
+
+fn print_listing(out: &mut dyn Write, queues: &[Queue]) -> std::io::Result<()> {
     for queue in queues {
         for state in &queue.states {
             for entry in &state.entries {
-                println!(
+                writeln!(
+                    out,
                     "{}\t{}\t{}\t{}\t{}",
                     queue.name,
                     state.state,
                     entry.status,
                     entry.label,
                     entry.path.display()
-                );
+                )?;
             }
         }
     }
+    Ok(())
+}
+
+fn to_stdout(render: impl FnOnce(&mut dyn Write) -> std::io::Result<()>) -> Result<()> {
+    let mut out = std::io::stdout().lock();
+    match render(&mut out).and_then(|()| out.flush()) {
+        Err(closed) if closed.kind() == ErrorKind::BrokenPipe => std::process::exit(0),
+        other => Ok(other?),
+    }
+}
+
+fn print_completions(shell: clap_complete::Shell) -> Result<()> {
+    let mut command = Options::command();
+    let name = command.get_name().to_string();
+    to_stdout(|out| {
+        clap_complete::generate(shell, &mut command, name, out);
+        Ok(())
+    })
 }
 
 fn write_starter_config(

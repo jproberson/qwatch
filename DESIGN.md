@@ -471,7 +471,17 @@ qwatch --json             list every file as JSON and exit
 qwatch init [DIRECTORY]   look at a directory and write a starter config
 qwatch init --output PATH  write it somewhere else, to share with a team
 qwatch init --print        show it without writing anything
+qwatch completions SHELL   print a completion script
 ```
+
+Output goes to stdout and everything else to stderr, so `--list` and `--json`
+pipe cleanly. A closed pipe exits 0 rather than reporting a failure, since
+`qwatch --list | head` is a normal thing to do and Rust's default is to panic on
+the write. Usage errors exit 2, anything else that went wrong exits 1.
+
+Asking for the browser without a terminal says so instead of panicking, which is
+what happens if the terminal is initialised anyway. Colour follows `NO_COLOR`,
+and `--no-color` says the same thing on the command line.
 
 Listing is a flag rather than a subcommand because it modifies the same
 operation. `init` is a subcommand because it is a different one: it writes a
