@@ -9,7 +9,7 @@ use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::remember::{Book, Remembered};
 use crate::scan::{self, Entry, Queue};
-use crate::ui::settings::{Choice, Entry as Setting, Panel, Section, choosing, rebinding, telling};
+use crate::ui::settings::{Choice, Panel, Section, choosing, rebinding, telling};
 use crate::ui::table::{Order, Row};
 use crate::ui::theme::Theme;
 use crate::watch;
@@ -437,14 +437,14 @@ impl App {
                     "config",
                     self.config_path
                         .as_deref()
-                        .map_or("none".to_string(), |path| shortened(path))
+                        .map_or("none".to_string(), shortened)
                 )),
                 telling(format!(
                     "{:<12} {}",
                     "settings",
                     self.book_path
                         .as_deref()
-                        .map_or("not saved".to_string(), |path| shortened(path))
+                        .map_or("not saved".to_string(), shortened)
                 )),
                 telling(String::new()),
                 choosing(&crate::update::described(), false, Choice::Update),
@@ -866,6 +866,7 @@ fn edit(path: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::settings::Entry as Setting;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
