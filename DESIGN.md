@@ -487,8 +487,10 @@ An update announces itself rather than waiting to be found. A background
 `git ls-remote --tags` reads the released versions and compares the highest
 against the one built in: a couple of hundred bytes and a third of a second,
 with no HTTP client, no API and no auth, because git is already required to
-install the thing. The footer's `ctrl-s settings` becomes `ctrl-s update ready`,
-and the about section says so beside the version. A failed check says nothing at
+install the thing. A coloured `*` appears against `settings` in the footer and against
+`about` in the panel's tabs, and the about section says so beside the version.
+A marker rather than changed wording, so the footer keeps saying what the key
+does and the eye still has something to catch. A failed check says nothing at
 all, and `update_check = false` turns it off.
 
 Tags rather than commits, which puts an obligation on whoever pushes: **cut a

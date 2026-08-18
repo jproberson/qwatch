@@ -1155,14 +1155,68 @@ label   = "id"
     }
 
     #[test]
-    fn the_footer_says_when_an_update_is_waiting() {
+    fn the_footer_marks_the_settings_when_an_update_is_waiting() {
         let (_root, mut app) = fixture();
-        assert!(footer_of(&mut app, 120).contains("settings"));
-        assert!(!footer_of(&mut app, 120).contains("update ready"));
+        let quiet = footer_of(&mut app, 120);
+        assert!(quiet.contains("settings"));
+        assert!(!quiet.contains(render::WAITING), "{quiet:?}");
 
         app.update_ready = true;
-        let footer = footer_of(&mut app, 120);
-        assert!(footer.contains("update ready"), "{footer:?}");
+        let loud = footer_of(&mut app, 120);
+        assert!(
+            loud.contains(&format!("settings{}", render::WAITING)),
+            "{loud:?}"
+        );
+    }
+
+    #[test]
+    fn the_settings_tabs_mark_the_section_that_has_the_update() {
+        let (_root, mut app) = fixture();
+        app.update_ready = true;
+        app.panel = Some(Panel::opened_at(&app.sections()));
+
+        let painted = screen(&mut app, 92, 16);
+        let tabs = painted
+            .lines()
+            .find(|line| line.contains("layout") && line.contains("about"))
+            .expect("no tab line");
+        assert!(
+            tabs.contains(&format!("about{}", render::WAITING)),
+            "{tabs:?}"
+        );
+    }
+
+    #[test]
+    fn an_update_is_not_whispered_in_the_same_grey_as_everything_else() {
+        let (_root, mut app) = fixture();
+        app.theme = Theme::default();
+
+        let styles = |app: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+            terminal.draw(|frame| render::draw(frame, app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let row = buffer.area.height - 1;
+            let painted = (0..buffer.area.width)
+                .filter(|x| buffer[(*x, row)].symbol() != " ")
+                .max()
+                .unwrap_or(0);
+            (0..=painted)
+                .map(|x| buffer[(x, row)].style())
+                .collect::<Vec<_>>()
+        };
+
+        let quiet = styles(&mut app);
+        assert!(
+            quiet.windows(2).all(|pair| pair[0] == pair[1]),
+            "the footer should be one shade when there is nothing to say"
+        );
+
+        app.update_ready = true;
+        let loud = styles(&mut app);
+        assert!(
+            !loud.windows(2).all(|pair| pair[0] == pair[1]),
+            "the update notice is painted the same as the rest of the footer"
+        );
     }
 
     #[test]

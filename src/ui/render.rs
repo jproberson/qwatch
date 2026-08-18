@@ -243,26 +243,24 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
 
     let keys = &app.profile.keys;
     let head_cost = 1;
-    let settings = match app.update_ready {
-        true => "update ready",
-        false => "settings",
+    let star = match app.update_ready {
+        true => WAITING,
+        false => "",
     };
-    let tail = [
-        format!(
-            "{} {settings}  {} help  {} quit",
-            first_of(&keys.settings),
-            first_of(&keys.help),
-            first_of(&keys.quit)
-        ),
-        format!(
-            "{} help  {} quit",
-            first_of(&keys.help),
-            first_of(&keys.quit)
-        ),
-        format!("{} quit", first_of(&keys.quit)),
+    let settings = format!("{} settings", first_of(&keys.settings));
+    let help_quit = format!(
+        "{} help  {} quit",
+        first_of(&keys.help),
+        first_of(&keys.quit)
+    );
+
+    let (tail, roomy) = [
+        (format!("{settings}{star}  {help_quit}"), true),
+        (help_quit.clone(), false),
+        (format!("{} quit", first_of(&keys.quit)), false),
     ]
     .into_iter()
-    .find(|candidate| head_cost + candidate.chars().count() <= width)
+    .find(|(candidate, _)| head_cost + candidate.chars().count() <= width)
     .unwrap_or_default();
 
     let mut optional: Vec<String> = app
@@ -297,12 +295,22 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
     if hidden {
         parts.push("\u{2026}".to_string());
     }
-    parts.push(tail);
 
-    Line::from(Span::styled(
-        format!(" {}", parts.join("  ")),
-        app.theme.muted(),
-    ))
+    let bare = parts.join("  ");
+    let gap = match bare.is_empty() {
+        true => " ",
+        false => "  ",
+    };
+    let mut spans = vec![Span::styled(format!(" {bare}{gap}"), app.theme.muted())];
+    match roomy && app.update_ready {
+        true => spans.extend([
+            Span::styled(settings, app.theme.muted()),
+            Span::styled(WAITING, app.theme.notice()),
+            Span::styled(format!("  {help_quit}"), app.theme.muted()),
+        ]),
+        false => spans.push(Span::styled(tail, app.theme.muted())),
+    }
+    Line::from(spans)
 }
 
 fn first_of(bindings: &[crate::keys::Binding]) -> String {
@@ -441,6 +449,8 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
     );
 }
 
+pub const WAITING: &str = "*";
+
 const PANEL_CAP: u16 = 72;
 
 const HINTS: &str = " up/down choose   tab section   enter apply   esc close ";
@@ -463,6 +473,9 @@ fn tab_line(app: &App, panel: &crate::ui::settings::Panel, sections: &[Section])
             false => app.theme.muted(),
         };
         spans.push(Span::styled(section.title.clone(), style));
+        if section.title == "about" && app.update_ready {
+            spans.push(Span::styled(WAITING, app.theme.notice()));
+        }
     }
     Line::from(spans)
 }
