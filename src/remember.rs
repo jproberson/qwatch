@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Remembered {
+    pub root: Option<PathBuf>,
     pub layout: Option<Layout>,
     pub sort: Option<Order>,
     pub watching: Option<bool>,
@@ -92,6 +93,7 @@ mod tests {
         book.keep(
             "ingest",
             Remembered {
+                root: None,
                 layout: Some(Layout::ByStatus),
                 sort: Some(Order::Age),
                 watching: Some(false),
@@ -105,6 +107,26 @@ mod tests {
         assert_eq!(read.sort, Some(Order::Age));
         assert_eq!(read.watching, Some(false));
         assert_eq!(read.bindings("down").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_root_survives_a_round_trip() {
+        let home = TempDir::new().unwrap();
+        let path = home.path().join("remembered.toml");
+
+        let mut book = Book::default();
+        book.keep(
+            "ingest",
+            Remembered {
+                root: Some(PathBuf::from("/somewhere/else")),
+                ..Default::default()
+            },
+        );
+        book.write(&path).unwrap();
+        assert_eq!(
+            Book::read(&path).of("ingest").root,
+            Some(PathBuf::from("/somewhere/else"))
+        );
     }
 
     #[test]

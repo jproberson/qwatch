@@ -47,7 +47,6 @@ pub struct App {
     pub message: Option<String>,
     pub help: bool,
     pub panel: Option<Panel>,
-    pub catalogue: BTreeMap<String, Profile>,
     pub name: String,
     pub book: Book,
     pub book_path: Option<PathBuf>,
@@ -95,7 +94,6 @@ impl App {
             message: None,
             help: false,
             panel: None,
-            catalogue: BTreeMap::new(),
             name: String::new(),
             book: Book::default(),
             book_path: None,
@@ -401,23 +399,11 @@ impl App {
             },
         ];
 
-        if self.catalogue.len() > 1 {
-            sections.push(Section {
-                title: "queues".to_string(),
-                note: "which root to browse".to_string(),
-                entries: self
-                    .catalogue
-                    .iter()
-                    .map(|(name, profile)| {
-                        choosing(
-                            &format!("{name}  {}", shortened(&profile.root)),
-                            profile.root == self.profile.root,
-                            Choice::Profile(name.clone()),
-                        )
-                    })
-                    .collect(),
-            });
-        }
+        sections.push(Section {
+            title: "directory".to_string(),
+            note: "enter to edit, enter again to go there".to_string(),
+            entries: vec![choosing(&shortened(&self.profile.root), true, Choice::Root)],
+        });
 
         sections.push(Section {
             title: "watching".to_string(),
@@ -483,6 +469,10 @@ impl App {
             }
             return;
         }
+        if panel.typing.is_some() {
+            self.type_path(key);
+            return;
+        }
 
         match key.code {
             KeyCode::Esc => self.panel = None,
@@ -494,11 +484,64 @@ impl App {
                 let picked = panel.chosen(&sections).map(|entry| entry.choice.clone());
                 match picked {
                     Some(Choice::Rebind(motion)) => panel.capturing = Some(motion),
+                    Some(Choice::Root) => {
+                        panel.typing = Some(shortened(&self.profile.root));
+                    }
                     Some(choice) => self.take_up(choice),
                     None => {}
                 }
             }
             _ => {}
+        }
+    }
+
+    fn type_path(&mut self, key: KeyEvent) {
+        let Some(panel) = self.panel.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => panel.typing = None,
+            KeyCode::Backspace => {
+                if let Some(typed) = panel.typing.as_mut() {
+                    typed.pop();
+                }
+            }
+            KeyCode::Char(letter) => {
+                if let Some(typed) = panel.typing.as_mut() {
+                    typed.push(letter);
+                }
+            }
+            KeyCode::Enter => {
+                let Some(typed) = panel.typing.take() else {
+                    return;
+                };
+                self.move_to(&typed);
+            }
+            _ => {}
+        }
+    }
+
+    fn move_to(&mut self, typed: &str) {
+        let wanted = crate::config::expand_home(typed.trim());
+        let Ok(root) = wanted.canonicalize() else {
+            self.message = Some(format!("no such directory: {}", wanted.display()));
+            return;
+        };
+        if !root.is_dir() {
+            self.message = Some(format!("not a directory: {}", root.display()));
+            return;
+        }
+
+        self.profile.root = root.clone();
+        self.canonical_root = root;
+        self.cursor = 0;
+        match scan::scan(&self.profile) {
+            Ok(queues) => {
+                self.rebuild(queues);
+                self.message = None;
+                self.remember();
+            }
+            Err(failure) => self.message = Some(failure.to_string()),
         }
     }
 
@@ -521,6 +564,7 @@ impl App {
             return;
         };
         let mut kept = Remembered {
+            root: Some(self.profile.root.clone()),
             layout: Some(self.layout),
             sort: Some(self.order),
             watching: Some(self.watching),
@@ -558,36 +602,7 @@ impl App {
                 self.watching = on;
                 self.remember();
             }
-            Choice::Profile(name) => {
-                if let Some(profile) = self.catalogue.get(&name).cloned() {
-                    self.adopt(profile);
-                }
-            }
-        }
-    }
-
-    fn adopt(&mut self, profile: Profile) {
-        self.canonical_root = profile
-            .root
-            .canonicalize()
-            .unwrap_or_else(|_| profile.root.clone());
-        self.colors = status_colors(&profile);
-        self.bindings = profile
-            .action
-            .iter()
-            .filter_map(|action| Some((Binding::parse(&action.key).ok()?, action.clone())))
-            .collect();
-        self.layout = profile.layout;
-        self.watching = profile.watch.enabled;
-        self.profile = profile;
-        self.cursor = 0;
-
-        match scan::scan(&self.profile) {
-            Ok(queues) => {
-                self.rebuild(queues);
-                self.message = None;
-            }
-            Err(failure) => self.message = Some(failure.to_string()),
+            Choice::Root => {}
         }
     }
 
@@ -737,6 +752,11 @@ fn shortened(root: &std::path::Path) -> String {
 }
 
 fn recalled(mut profile: Profile, remembered: &Remembered) -> Profile {
+    if let Some(root) = &remembered.root
+        && root.is_dir()
+    {
+        profile.root = root.clone();
+    }
     for (motion, _, _) in profile.keys.motions() {
         if let Some(bindings) = remembered.bindings(motion) {
             for binding in bindings {
@@ -771,7 +791,6 @@ pub fn run(chosen: crate::Chosen) -> Result<()> {
 
     let mut app = App::new(recalled(chosen.profile, &remembered))?;
     app.theme = Theme::painting(chosen.colored);
-    app.catalogue = chosen.catalogue;
     app.name = chosen.name;
     app.book = book;
     app.book_path = chosen.book;
@@ -1002,14 +1021,102 @@ label   = "id"
 
     #[test]
     fn renders_the_settings_panel() {
-        let (root, mut app) = fixture();
-        let mut other = app.profile.clone();
-        other.root = root.path().join("receipts");
-        app.catalogue
-            .insert("ingest".to_string(), app.profile.clone());
-        app.catalogue.insert("receipts-only".to_string(), other);
+        let (_root, mut app) = fixture();
         app.panel = Some(Panel::opened_at(&app.sections()));
         println!("\n{}\n", screen(&mut app, 92, 20));
+    }
+
+    fn directory_tab(app: &mut App) {
+        open_settings(app);
+        let sections = app.sections();
+        let at = sections
+            .iter()
+            .position(|s| s.title == "directory")
+            .unwrap();
+        app.panel.as_mut().unwrap().tab = at;
+        app.panel.as_mut().unwrap().cursor = 0;
+    }
+
+    fn type_into(app: &mut App, text: &str) {
+        for letter in text.chars() {
+            app.on_key(KeyEvent::new(KeyCode::Char(letter), KeyModifiers::NONE));
+        }
+    }
+
+    #[test]
+    fn renders_the_directory_tab_mid_edit() {
+        let (_root, mut app) = fixture();
+        directory_tab(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        println!("\n{}\n", screen(&mut app, 92, 14));
+    }
+
+    #[test]
+    fn the_directory_can_be_typed_and_moved_to() {
+        let (_root, mut app) = fixture();
+        let elsewhere = TempDir::new().unwrap();
+        std::fs::create_dir(elsewhere.path().join("payroll")).unwrap();
+        std::fs::write(elsewhere.path().join("payroll/x_RunPayroll-3.txt"), "").unwrap();
+
+        directory_tab(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        assert!(app.panel.as_ref().unwrap().typing.is_some());
+
+        app.panel.as_mut().unwrap().typing = Some(String::new());
+        type_into(&mut app, &elsewhere.path().to_string_lossy());
+        tap(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.profile.root, elsewhere.path().canonicalize().unwrap());
+        assert!(
+            app.rows
+                .iter()
+                .filter_map(Row::entry)
+                .any(|entry| entry.label == "RunPayroll")
+        );
+    }
+
+    #[test]
+    fn a_directory_that_is_not_there_is_refused_and_nothing_moves() {
+        let (root, mut app) = fixture();
+        directory_tab(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        app.panel.as_mut().unwrap().typing = Some(String::new());
+        type_into(&mut app, "/nowhere/at/all");
+        tap(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.profile.root, root.path());
+        assert!(
+            app.message
+                .as_deref()
+                .unwrap()
+                .contains("no such directory")
+        );
+    }
+
+    #[test]
+    fn escaping_the_path_editor_stays_put() {
+        let (root, mut app) = fixture();
+        directory_tab(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        type_into(&mut app, "/tmp");
+        tap(&mut app, KeyCode::Esc);
+
+        assert!(app.panel.as_ref().unwrap().typing.is_none());
+        assert_eq!(app.profile.root, root.path());
+    }
+
+    #[test]
+    fn backspace_takes_a_character_off_the_path() {
+        let (_root, mut app) = fixture();
+        directory_tab(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        app.panel.as_mut().unwrap().typing = Some("/tmp/xy".to_string());
+        tap(&mut app, KeyCode::Backspace);
+
+        assert_eq!(
+            app.panel.as_ref().unwrap().typing.as_deref(),
+            Some("/tmp/x")
+        );
     }
 
     #[test]
@@ -1637,46 +1744,6 @@ label   = "id"
         tap(&mut app, KeyCode::Enter);
 
         assert!(!app.watching);
-    }
-
-    #[test]
-    fn choosing_another_queue_root_moves_the_whole_browser_to_it() {
-        let (root, mut app) = fixture();
-        let elsewhere = TempDir::new().unwrap();
-        std::fs::create_dir(elsewhere.path().join("payroll")).unwrap();
-        std::fs::write(elsewhere.path().join("payroll/x_RunPayroll-3.txt"), "").unwrap();
-
-        let mut other = app.profile.clone();
-        other.root = elsewhere.path().to_path_buf();
-        app.catalogue
-            .insert("here".to_string(), app.profile.clone());
-        app.catalogue.insert("there".to_string(), other);
-
-        open_settings(&mut app);
-        let sections = app.sections();
-        let queues = sections.iter().position(|s| s.title == "queues").unwrap();
-        let there = sections[queues]
-            .entries
-            .iter()
-            .position(|entry| entry.label.starts_with("there"))
-            .unwrap();
-        app.panel.as_mut().unwrap().tab = queues;
-        app.panel.as_mut().unwrap().cursor = there;
-        tap(&mut app, KeyCode::Enter);
-
-        assert_ne!(app.profile.root, root.path());
-        assert!(
-            app.rows
-                .iter()
-                .filter_map(Row::entry)
-                .any(|e| e.label == "RunPayroll")
-        );
-    }
-
-    #[test]
-    fn the_queues_section_stays_hidden_when_there_is_only_one() {
-        let (_root, app) = fixture();
-        assert!(app.sections().iter().all(|s| s.title != "queues"));
     }
 
     fn keys_tab(app: &mut App) {

@@ -17,7 +17,6 @@ use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use config::{Config, Profile};
 use scan::Queue;
-use std::collections::BTreeMap;
 use std::io::{ErrorKind, IsTerminal, Write};
 use std::path::PathBuf;
 
@@ -119,7 +118,6 @@ fn main() -> Result<()> {
 
 pub struct Chosen {
     pub profile: Profile,
-    pub catalogue: BTreeMap<String, Profile>,
     pub name: String,
     pub book: Option<PathBuf>,
     pub config: Option<PathBuf>,
@@ -130,7 +128,6 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
     if let Some(directory) = &options.directory {
         return Ok(Chosen {
             profile: Profile::for_directory(directory),
-            catalogue: BTreeMap::new(),
             name: directory.display().to_string(),
             book: config::default_config_path()
                 .as_deref()
@@ -161,7 +158,6 @@ fn chosen_profile(options: &Options) -> Result<Chosen> {
 
     Ok(Chosen {
         profile,
-        catalogue: config.profile,
         name,
         book: Some(remember::beside(&path)),
         config: Some(path),

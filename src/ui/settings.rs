@@ -6,7 +6,7 @@ pub enum Choice {
     Layout(Layout),
     Sort(Order),
     Watching(bool),
-    Profile(String),
+    Root,
     Rebind(String),
     Update,
     Nothing,
@@ -37,6 +37,7 @@ pub struct Panel {
     pub tab: usize,
     pub cursor: usize,
     pub capturing: Option<String>,
+    pub typing: Option<String>,
 }
 
 impl Panel {

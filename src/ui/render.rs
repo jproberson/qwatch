@@ -375,12 +375,16 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
     .areas(inner);
 
     frame.render_widget(tab_line(app, panel, &sections), tabs);
-    let (told, style) = match &panel.capturing {
-        Some(_) => (
+    let (told, style) = match (&panel.capturing, &panel.typing) {
+        (Some(_), _) => (
             "press a key to bind it, or esc to leave it alone".to_string(),
             app.theme.notice(),
         ),
-        None => (
+        (_, Some(_)) => (
+            "type a path, enter to go there, esc to stay".to_string(),
+            app.theme.notice(),
+        ),
+        _ => (
             sections
                 .get(panel.tab)
                 .map(|section| section.note.clone())
@@ -397,6 +401,15 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
         .entries
         .iter()
         .map(|entry| {
+            if let Some(typed) = &panel.typing
+                && entry.choice == crate::ui::settings::Choice::Root
+            {
+                return ListItem::new(Line::from(vec![
+                    Span::styled("> ", app.theme.notice()),
+                    Span::styled(typed.clone(), app.theme.job()),
+                    Span::styled("\u{2588}", app.theme.notice()),
+                ]));
+            }
             let mark = match entry.chosen {
                 true => "\u{2713} ",
                 false => "  ",
