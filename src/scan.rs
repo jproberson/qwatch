@@ -268,11 +268,13 @@ state = "queued"
 
     fn tree(spec: &[(&str, &[&str])]) -> TempDir {
         let root = TempDir::new().unwrap();
+        let mut position = 0;
         for (directory, files) in spec {
             let path = root.path().join(directory);
             std::fs::create_dir_all(&path).unwrap();
             for file in *files {
-                std::fs::write(path.join(file), "").unwrap();
+                crate::testing::write_in_order(&path.join(file), "", position);
+                position += 1;
             }
         }
         root

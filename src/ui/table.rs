@@ -312,10 +312,13 @@ label    = "{job}"
     impl Fixture {
         fn new(spec: &[(&str, &[&str])]) -> Self {
             let root = TempDir::new().unwrap();
+            let mut position = 0;
             for (directory, files) in spec {
                 std::fs::create_dir_all(root.path().join(directory)).unwrap();
                 for file in *files {
-                    std::fs::write(root.path().join(directory).join(file), "").unwrap();
+                    let path = root.path().join(directory).join(file);
+                    crate::testing::write_in_order(&path, "", position);
+                    position += 1;
                 }
             }
             let mut profile: Profile = toml::from_str(PROFILE).unwrap();

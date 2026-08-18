@@ -509,6 +509,12 @@ evaporating:
   one, and a watch misses whatever happens in the moment before it arms. A
   backstop pass that finds nothing costs one directory read and no redraw.
 - **Why mtime is trusted as enqueue time.** See above.
+- **Why test fixtures stamp their own mtimes.** Files written one after another
+  can land in the same clock tick, and whether they do depends on the
+  filesystem. macOS gave them distinct times and Linux did not, so tests that
+  leaned on write order passed on one and failed on the other. Ordering falls
+  back to the filename on a tie, which is deterministic but not what the writer
+  of the fixture had in mind.
 - **Why directory matching is most-specific-wins.** Otherwise a failure
   directory reads as a queue of its own.
 

@@ -7,6 +7,8 @@ mod preview;
 mod remember;
 mod scan;
 mod status;
+#[cfg(test)]
+mod testing;
 mod ui;
 mod watch;
 

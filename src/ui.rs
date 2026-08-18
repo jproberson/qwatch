@@ -920,21 +920,16 @@ label   = "id"
         for directory in ["invoices", "invoices-failed", "receipts", "receipts-failed"] {
             std::fs::create_dir(root.path().join(directory)).unwrap();
         }
-        std::fs::write(
-            root.path().join("receipts/x_RenderReport-0.txt"),
-            "RenderReport,0",
-        )
-        .unwrap();
-        std::fs::write(
-            root.path().join("receipts-failed/x_ParseInvoice-0.txt"),
-            "ParseInvoice,0",
-        )
-        .unwrap();
-        std::fs::write(
-            root.path().join("receipts-failed/3_ExtractTotals-1.txt"),
-            PAYLOAD,
-        )
-        .unwrap();
+        for (position, (path, contents)) in [
+            ("receipts-failed/x_ParseInvoice-0.txt", "ParseInvoice,0"),
+            ("receipts-failed/3_ExtractTotals-1.txt", PAYLOAD),
+            ("receipts/x_RenderReport-0.txt", "RenderReport,0"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            crate::testing::write_in_order(&root.path().join(path), contents, position as u64);
+        }
 
         let mut profile: Profile = toml::from_str(PROFILE).unwrap();
         profile.validate().unwrap();

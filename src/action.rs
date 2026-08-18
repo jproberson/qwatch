@@ -273,11 +273,13 @@ type = "edit"
     impl Fixture {
         fn new(spec: &[(&str, &[&str])]) -> Self {
             let root = TempDir::new().unwrap();
+            let mut position = 0;
             for (directory, files) in spec {
                 let path = root.path().join(directory);
                 std::fs::create_dir_all(&path).unwrap();
                 for file in *files {
-                    std::fs::write(path.join(file), "payload").unwrap();
+                    crate::testing::write_in_order(&path.join(file), "payload", position);
+                    position += 1;
                 }
             }
             let mut profile: Profile = toml::from_str(PROFILE).unwrap();
