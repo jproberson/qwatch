@@ -310,9 +310,9 @@ shell, and here it would run on every cursor movement.
  j/k move  r restart  d delete  D delete all 3  X delete 2 failed  …  ? help  q quit
 ```
 
-Two layouts, `layout = "table"` (the default) or `layout = "grouped"`, switched
-live with `t` because the right one depends on what the queues look like rather
-than on taste.
+Three layouts, switched live with `t` because the right one depends on what the
+queues look like rather than on taste. "Grouped" was the wrong name for one of
+them once there was more than one way to group, so they say what they group by.
 
 The table is one row per file with a queue column. It scales to many queues,
 makes any column worth sorting by, and reads as one list.
@@ -324,8 +324,8 @@ makes any column worth sorting by, and reads as one list.
  receipts  waiting  RenderReport #0                 2d
 ```
 
-Grouped gives each queue a heading and its own tally, and drops the queue column
-as redundant. It reads better when there are few queues and you think in terms
+`by-queue` gives each queue a heading and its own tally, and drops the queue
+column as redundant. It reads better when there are few queues and you think in terms
 of them, and it shows a queue holding nothing without a placeholder row pretending
 to be a file.
 
@@ -338,9 +338,24 @@ to be a file.
      waiting  RenderReport #0                      2d
 ```
 
+`by-status` gathers a status across every queue, drops the status column, and
+keeps the queue one, which answers "show me everything that is stuck" in one
+glance regardless of where it is stuck. Statuses that need attention head the
+list, and a status with no files simply has no heading, since there is nothing
+to say about it.
+
+```
+ failed                                       2 files
+     receipts  ParseInvoice #0                    10d
+     receipts  ExtractTotals #1                   10d
+
+ waiting                                       1 file
+     sandbox   RenderReport #0                     2d
+```
+
 Sorting applies inside each group rather than across them, which is the trade
 grouping makes: you give up "what is oldest anywhere" to get "what is going on
-in this queue". Switching layout keeps the file under the cursor selected.
+in this group". Switching layout keeps the file under the cursor selected.
 
 The preview sits Both panes are boxed, which gives the root name and the selected
 file's label somewhere to live, and the file count a home on the bottom edge.
@@ -385,13 +400,18 @@ the current one tells them everything.
 The queues section lists the profiles in the config file and switches the whole
 browser to one, which is the only way to change root without restarting. It is
 hidden when there is only one profile, because a list of one is not a choice.
-The keys section is read-only and says so: it scrolls, but bindings are set in
-the config file.
+The keys section rebinds: `enter` on a motion waits for the next keypress and
+takes it, or `esc` leaves it alone. A key an action already owns is refused with
+the reason rather than quietly stealing it. Profile actions are listed but not
+editable, since their keys come with the action.
 
-Changes apply to the running session and are not written back. Rewriting a TOML
-file while keeping its comments and ordering intact is a different problem than
-this panel is worth, and silently reformatting somebody's config would be worse
-than not saving at all.
+Changes are written to `remembered.toml` beside the config file, keyed by
+profile, and read back at startup over whatever the profile says. Writing them
+into the config itself would mean rewriting somebody's TOML while preserving
+comments and ordering, and silently reformatting their file is worse than
+keeping session state somewhere of our own. It also means a config checked into
+a team's repo stays exactly as they wrote it while each person keeps their own
+layout.
 
 ## Keys
 

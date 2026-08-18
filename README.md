@@ -111,14 +111,16 @@ vim defaults, all rebindable:
 | `enter` | Open in `$EDITOR` |
 | `R` | Rescan now |
 | `s` | Change sort order |
-| `t` | Switch between the table and grouped layouts |
+| `t` | Cycle the layout: table, by queue, by status |
 | `ctrl-s` | Settings: layout, sort, queues, watching, keys |
 | `?` | Show the keys |
 | `q` `esc` | Quit |
 
-`ctrl-s` opens a settings panel with a section per thing worth changing, which
-is easier than remembering which key cycles what. Changes last for the session;
-edit the config to make them stick.
+`ctrl-s` opens a settings panel with a section per thing worth changing: layout,
+sort, watching, and keys. Rebinding is done there too, by pressing `enter` on a
+motion and then the key you want. Choices are remembered in `remembered.toml`
+beside your config, so they survive a restart without your config file being
+rewritten.
 
 Actions from your profile bind their own keys on top. Clicking a row selects it,
 and the wheel scrolls whichever pane is under the pointer.
@@ -128,6 +130,36 @@ and the wheel scrolls whichever pane is under the pointer.
 down = ["n", "ctrl-j"]
 quit = ["ctrl-c"]        # this frees up `q` for an action of your own
 ```
+
+## Install
+
+Pick whichever is least annoying.
+
+**A prebuilt binary.** Grab the `.tar.gz` for your Mac from the releases page,
+unpack it, and put `qwatch` somewhere on your `PATH`:
+
+```
+tar xzf qwatch-aarch64-apple-darwin.tar.gz    # x86_64- on an Intel Mac
+mv qwatch /usr/local/bin/
+```
+
+macOS will refuse to run an unsigned download the first time. Right-click it in
+Finder and choose Open, or run `xattr -d com.apple.quarantine /usr/local/bin/qwatch`.
+
+**With cargo**, if you have Rust:
+
+```
+cargo install --git https://github.com/OWNER/qwatch
+```
+
+**From a checkout:**
+
+```
+cargo install --path .
+```
+
+Then `qwatch init <your queue directory>` to write a starting config, and
+`qwatch` to browse it.
 
 ## Build
 

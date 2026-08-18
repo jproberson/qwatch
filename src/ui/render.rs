@@ -45,11 +45,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let widths = Widths::of(
-        &app.rows,
-        area.width.saturating_sub(3) as usize,
-        app.layout == crate::config::Layout::Grouped,
-    );
+    let widths = Widths::of(&app.rows, area.width.saturating_sub(3) as usize, app.layout);
     let items: Vec<ListItem> = app
         .rows
         .iter()
@@ -125,47 +121,51 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
             ),
             app.theme.columns(),
         )),
-        Row::Empty(queue) => match widths.grouped {
-            true => Line::from(Span::styled("     empty", app.theme.muted())),
-            false => Line::from(vec![
-                Span::styled(
-                    format!(" {:width$} ", queue, width = widths.queue),
-                    app.theme.queue(),
-                ),
-                Span::styled("empty", app.theme.muted()),
-            ]),
-        },
+        Row::Empty(queue) if widths.layout.heads_groups() => Line::from(Span::styled(
+            format!("{}empty", " ".repeat(widths.indent() + 1)),
+            app.theme.muted(),
+        )),
+        Row::Empty(queue) => Line::from(vec![
+            Span::styled(
+                format!(" {:width$} ", queue, width = widths.queue),
+                app.theme.queue(),
+            ),
+            Span::styled("empty", app.theme.muted()),
+        ]),
         Row::File(entry) => {
             let job = match &entry.detail {
                 Some(detail) => format!("{} {}", entry.label, detail),
                 None => entry.label.clone(),
             };
-            let first = match widths.grouped {
-                true => Span::raw(" ".repeat(widths.queue + 2)),
-                false => Span::styled(
+            let mut spans = vec![Span::raw(" ".repeat(widths.indent() + 1))];
+            if widths.queue > 0 {
+                spans.push(Span::styled(
                     format!(
-                        " {:width$} ",
+                        "{:width$} ",
                         truncated(&entry.queue, widths.queue),
                         width = widths.queue
                     ),
                     app.theme.queue(),
-                ),
-            };
-            Line::from(vec![
-                first,
-                Span::styled(
+                ));
+            }
+            if widths.status > 0 {
+                spans.push(Span::styled(
                     entry.status.clone(),
-                    app.theme.status(app.color_of(&entry.status)),
-                ),
-                Span::styled(
+                    app.theme
+                        .status(app.color_of(&entry.status))
+                        .patch(app.theme.awake()),
+                ));
+                spans.push(Span::styled(
                     entry
                         .badge
                         .as_ref()
                         .map(|badge| format!(" {badge}"))
                         .unwrap_or_default(),
                     app.theme.badge(),
-                ),
-                Span::raw(" ".repeat(status_padding(entry, widths.status))),
+                ));
+                spans.push(Span::raw(" ".repeat(status_padding(entry, widths.status))));
+            }
+            spans.extend([
                 Span::styled(
                     format!(
                         "{:width$} ",
@@ -182,7 +182,8 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
                     ),
                     app.theme.muted(),
                 ),
-            ])
+            ]);
+            Line::from(spans)
         }
     }
 }
@@ -331,12 +332,21 @@ fn key_line(app: &App, key: &str, meaning: &str) -> Line<'static> {
 
 fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Panel, area: Rect) {
     let sections = app.sections();
-    let width = area
-        .width
-        .saturating_sub(area.width / 6)
-        .max(40)
-        .min(area.width);
-    let height = area.height.saturating_sub(2).max(8).min(area.height);
+    let rows = sections
+        .get(panel.tab)
+        .map(|section| section.entries.len())
+        .unwrap_or(0) as u16;
+    let widest = sections
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .map(|entry| entry.label.chars().count() + 4)
+        .chain(std::iter::once(tabs_width(&sections)))
+        .chain(std::iter::once(HINTS.chars().count()))
+        .max()
+        .unwrap_or(40) as u16;
+
+    let width = (widest + 4).clamp(40, area.width.min(PANEL_CAP));
+    let height = (rows + 6).clamp(8, area.height);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -349,13 +359,7 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
         .border_style(app.theme.title())
         .padding(Padding::horizontal(1))
         .title(Span::styled(" settings ", app.theme.title()))
-        .title_bottom(
-            Line::from(Span::styled(
-                " up/down choose   tab section   enter apply   esc close ",
-                app.theme.muted(),
-            ))
-            .centered(),
-        );
+        .title_bottom(Line::from(Span::styled(HINTS, app.theme.muted())).centered());
     let inner = block.inner(popup);
 
     frame.render_widget(Clear, popup);
@@ -369,16 +373,20 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
     .areas(inner);
 
     frame.render_widget(tab_line(app, panel, &sections), tabs);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
+    let (told, style) = match &panel.capturing {
+        Some(_) => (
+            "press a key to bind it, or esc to leave it alone".to_string(),
+            app.theme.notice(),
+        ),
+        None => (
             sections
                 .get(panel.tab)
                 .map(|section| section.note.clone())
                 .unwrap_or_default(),
             app.theme.muted(),
-        ))),
-        note,
-    );
+        ),
+    };
+    frame.render_widget(Paragraph::new(Line::from(Span::styled(told, style))), note);
 
     let Some(section) = sections.get(panel.tab) else {
         return;
@@ -397,7 +405,10 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
             };
             ListItem::new(Line::from(vec![
                 Span::styled(mark, app.theme.label()),
-                Span::styled(entry.label.clone(), style),
+                Span::styled(
+                    truncated(&entry.label, width.saturating_sub(6) as usize),
+                    style,
+                ),
             ]))
         })
         .collect();
@@ -409,6 +420,17 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
         list,
         &mut state,
     );
+}
+
+const PANEL_CAP: u16 = 72;
+
+const HINTS: &str = " up/down choose   tab section   enter apply   esc close ";
+
+fn tabs_width(sections: &[Section]) -> usize {
+    sections
+        .iter()
+        .map(|section| section.title.chars().count() + 3)
+        .sum()
 }
 
 fn tab_line(app: &App, panel: &crate::ui::settings::Panel, sections: &[Section]) -> Line<'static> {
@@ -477,17 +499,26 @@ struct Widths {
     status: usize,
     job: usize,
     total: usize,
-    grouped: bool,
+    layout: crate::config::Layout,
 }
 
 impl Widths {
-    fn of(rows: &[Row], available: usize, grouped: bool) -> Self {
+    fn indent(&self) -> usize {
+        match self.layout.heads_groups() {
+            true => 4,
+            false => 0,
+        }
+    }
+}
+
+impl Widths {
+    fn of(rows: &[Row], available: usize, layout: crate::config::Layout) -> Self {
         let mut widths = Self {
             queue: 5,
             status: 6,
             job: 3,
             total: available,
-            grouped,
+            layout,
         };
         for entry in rows.iter().filter_map(Row::entry) {
             widths.queue = widths.queue.max(entry.queue.len());
@@ -496,13 +527,16 @@ impl Widths {
             let detail = entry.detail.as_ref().map_or(0, |detail| detail.len() + 1);
             widths.job = widths.job.max(entry.label.len() + detail);
         }
-        widths.queue = match grouped {
-            true => 2,
-            false => widths.queue.min(QUEUE_CAP),
+        widths.queue = match layout.shows_queue() {
+            true => widths.queue.min(QUEUE_CAP),
+            false => 0,
         };
-        widths.status = widths.status.min(STATUS_CAP);
+        widths.status = match layout.shows_status() {
+            true => widths.status.min(STATUS_CAP),
+            false => 0,
+        };
 
-        let spent = 5 + widths.queue + widths.status + AGE_WIDTH;
+        let spent = 5 + widths.indent() + widths.queue + widths.status + AGE_WIDTH;
         widths.job = available.saturating_sub(spent).clamp(
             3,
             widths.job.min(JOB_CAP).max(available.saturating_sub(spent)),

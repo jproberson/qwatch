@@ -7,6 +7,7 @@ pub enum Choice {
     Sort(Order),
     Watching(bool),
     Profile(String),
+    Rebind(String),
     Nothing,
 }
 
@@ -34,6 +35,7 @@ pub struct Section {
 pub struct Panel {
     pub tab: usize,
     pub cursor: usize,
+    pub capturing: Option<String>,
 }
 
 impl Panel {
@@ -111,6 +113,14 @@ pub fn telling(label: String) -> Entry {
     }
 }
 
+pub fn rebinding(label: String, motion: &str) -> Entry {
+    Entry {
+        label,
+        chosen: false,
+        choice: Choice::Rebind(motion.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,7 +132,7 @@ mod tests {
                 note: String::new(),
                 entries: vec![
                     choosing("table", false, Choice::Layout(Layout::Table)),
-                    choosing("grouped", true, Choice::Layout(Layout::Grouped)),
+                    choosing("by queue", true, Choice::Layout(Layout::ByQueue)),
                 ],
             },
             Section {

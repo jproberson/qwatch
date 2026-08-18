@@ -7,8 +7,9 @@ use crate::action::{self, Change, Plan};
 use crate::config::{Action, ActionKind, Layout, Profile, Scope, StatusColor};
 use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
+use crate::remember::{Book, Remembered};
 use crate::scan::{self, Entry, Queue};
-use crate::ui::settings::{Choice, Panel, Section, choosing, telling};
+use crate::ui::settings::{Choice, Panel, Section, choosing, rebinding, telling};
 use crate::ui::table::{Order, Row};
 use crate::ui::theme::Theme;
 use crate::watch;
@@ -47,6 +48,9 @@ pub struct App {
     pub help: bool,
     pub panel: Option<Panel>,
     pub catalogue: BTreeMap<String, Profile>,
+    pub name: String,
+    pub book: Book,
+    pub book_path: Option<PathBuf>,
     pub help_scroll: u16,
     pub theme: Theme,
     pub now: SystemTime,
@@ -90,6 +94,9 @@ impl App {
             help: false,
             panel: None,
             catalogue: BTreeMap::new(),
+            name: String::new(),
+            book: Book::default(),
+            book_path: None,
             help_scroll: 0,
             theme: Theme::default(),
             now: SystemTime::now(),
@@ -369,7 +376,7 @@ impl App {
             Section {
                 title: "layout".to_string(),
                 note: "how the list is shaped".to_string(),
-                entries: [Layout::Table, Layout::Grouped]
+                entries: Layout::ALL
                     .into_iter()
                     .map(|layout| {
                         choosing(
@@ -399,7 +406,7 @@ impl App {
                     .iter()
                     .map(|(name, profile)| {
                         choosing(
-                            &format!("{name}  {}", profile.root.display()),
+                            &format!("{name}  {}", shortened(&profile.root)),
                             profile.root == self.profile.root,
                             Choice::Profile(name.clone()),
                         )
@@ -418,19 +425,20 @@ impl App {
         });
         sections.push(Section {
             title: "keys".to_string(),
-            note: "set these in the config file".to_string(),
+            note: "enter, then press the key you want".to_string(),
             entries: self
                 .profile
-                .action
-                .iter()
-                .map(|action| telling(format!("{:<12} {}", action.key, self.labelled(action))))
-                .chain(
-                    self.profile
-                        .keys
-                        .described()
-                        .into_iter()
-                        .map(|(keys, meaning)| telling(format!("{keys:<12} {meaning}"))),
-                )
+                .keys
+                .motions()
+                .into_iter()
+                .map(|(motion, keys, meaning)| rebinding(format!("{keys:<14} {meaning}"), motion))
+                .chain(self.profile.action.iter().map(|action| {
+                    telling(format!(
+                        "{:<14} {}  (set in the config)",
+                        action.key,
+                        self.labelled(action)
+                    ))
+                }))
                 .collect(),
         });
         sections
@@ -442,6 +450,13 @@ impl App {
             return;
         };
 
+        if let Some(motion) = panel.capturing.take() {
+            if key.code != KeyCode::Esc {
+                self.capture(&motion, key);
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Esc => self.panel = None,
             KeyCode::Tab | KeyCode::Right => panel.switch_tab(1, &sections),
@@ -450,26 +465,68 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => panel.step(-1, &sections),
             KeyCode::Enter => {
                 let picked = panel.chosen(&sections).map(|entry| entry.choice.clone());
-                if let Some(choice) = picked {
-                    self.take_up(choice);
+                match picked {
+                    Some(Choice::Rebind(motion)) => panel.capturing = Some(motion),
+                    Some(choice) => self.take_up(choice),
+                    None => {}
                 }
             }
             _ => {}
         }
     }
 
+    fn capture(&mut self, motion: &str, key: KeyEvent) {
+        let Some(binding) = Binding::of(key) else {
+            self.message = Some("that key cannot be bound".to_string());
+            return;
+        };
+        if self.bindings.iter().any(|(bound, _)| *bound == binding) {
+            self.message = Some(format!("{} already runs an action", binding.written()));
+            return;
+        }
+        if self.profile.keys.rebind(motion, binding) {
+            self.remember();
+        }
+    }
+
+    fn remember(&mut self) {
+        let Some(path) = self.book_path.clone() else {
+            return;
+        };
+        let mut kept = Remembered {
+            layout: Some(self.layout),
+            sort: Some(self.order),
+            watching: Some(self.watching),
+            ..Default::default()
+        };
+        for (motion, _, _) in self.profile.keys.motions() {
+            if let Some(written) = self.profile.keys.written(motion) {
+                kept.keys.insert(motion.to_string(), written);
+            }
+        }
+        self.book.keep(&self.name, kept);
+        if let Err(failure) = self.book.write(&path) {
+            self.message = Some(failure.to_string());
+        }
+    }
+
     fn take_up(&mut self, choice: Choice) {
         match choice {
-            Choice::Nothing => {}
+            Choice::Nothing | Choice::Rebind(_) => {}
             Choice::Layout(layout) => {
                 self.layout = layout;
                 self.relist();
+                self.remember();
             }
             Choice::Sort(order) => {
                 self.order = order;
                 self.relist();
+                self.remember();
             }
-            Choice::Watching(on) => self.watching = on,
+            Choice::Watching(on) => {
+                self.watching = on;
+                self.remember();
+            }
             Choice::Profile(name) => {
                 if let Some(profile) = self.catalogue.get(&name).cloned() {
                     self.adopt(profile);
@@ -539,7 +596,7 @@ impl App {
                 self.relist();
             }
             Motion::Layout => {
-                self.layout = self.layout.other();
+                self.layout = self.layout.next();
                 self.relist();
             }
             Motion::Settings => {
@@ -637,6 +694,28 @@ fn resting_color(state: &crate::config::State) -> StatusColor {
     }
 }
 
+fn shortened(root: &std::path::Path) -> String {
+    let shown = root.display().to_string();
+    let Some(home) = std::env::var_os("HOME") else {
+        return shown;
+    };
+    match shown.strip_prefix(&home.to_string_lossy().into_owned()) {
+        Some(rest) => format!("~{rest}"),
+        None => shown,
+    }
+}
+
+fn recalled(mut profile: Profile, remembered: &Remembered) -> Profile {
+    for (motion, _, _) in profile.keys.motions() {
+        if let Some(bindings) = remembered.bindings(motion) {
+            for binding in bindings {
+                profile.keys.rebind(motion, binding);
+            }
+        }
+    }
+    profile
+}
+
 fn refusal_lines(batch: &action::Batch) -> Vec<String> {
     if batch.refusals.is_empty() {
         return Vec::new();
@@ -655,9 +734,30 @@ fn refusal_lines(batch: &action::Batch) -> Vec<String> {
     lines
 }
 
-pub fn run(profile: Profile, catalogue: BTreeMap<String, Profile>) -> Result<()> {
-    let mut app = App::new(profile)?;
+pub fn run(
+    profile: Profile,
+    catalogue: BTreeMap<String, Profile>,
+    name: String,
+    book_path: Option<PathBuf>,
+) -> Result<()> {
+    let book = book_path.as_deref().map(Book::read).unwrap_or_default();
+    let remembered = book.of(&name);
+
+    let mut app = App::new(recalled(profile, &remembered))?;
     app.catalogue = catalogue;
+    app.name = name;
+    app.book = book;
+    app.book_path = book_path;
+    if let Some(layout) = remembered.layout {
+        app.layout = layout;
+    }
+    if let Some(order) = remembered.sort {
+        app.order = order;
+    }
+    if let Some(watching) = remembered.watching {
+        app.watching = watching;
+    }
+    app.relist();
 
     loop {
         let mut terminal = ratatui::init();
@@ -867,7 +967,7 @@ label   = "id"
     #[test]
     fn renders_the_grouped_layout() {
         let (_root, mut app) = fixture();
-        app.layout = crate::config::Layout::Grouped;
+        app.layout = Layout::ByQueue;
         app.relist();
         app.refresh_preview();
         println!("\n{}\n", screen(&mut app, 92, 20));
@@ -895,6 +995,15 @@ label   = "id"
         }
         app.panel = Some(panel);
         println!("\n{}\n", screen(&mut app, 92, 20));
+    }
+
+    #[test]
+    fn renders_by_status() {
+        let (_root, mut app) = fixture();
+        app.layout = Layout::ByStatus;
+        app.relist();
+        app.refresh_preview();
+        println!("\n{}\n", screen(&mut app, 92, 16));
     }
 
     #[test]
@@ -1360,24 +1469,22 @@ label   = "id"
         app.cursor = table::last_file(&app.rows).unwrap();
         let held = app.selected().unwrap().path.clone();
 
-        app.on_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        assert_eq!(app.layout, crate::config::Layout::Grouped);
-        assert_eq!(app.selected().unwrap().path, held);
-
-        app.on_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
-        assert_eq!(app.layout, crate::config::Layout::Table);
-        assert_eq!(app.selected().unwrap().path, held);
+        for expected in [Layout::ByQueue, Layout::ByStatus, Layout::Table] {
+            app.on_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+            assert_eq!(app.layout, expected);
+            assert_eq!(app.selected().unwrap().path, held);
+        }
     }
 
     #[test]
-    fn a_profile_can_open_straight_into_the_grouped_layout() {
+    fn a_profile_can_open_straight_into_a_grouped_layout() {
         let (root, _) = fixture();
         let mut profile: Profile =
-            toml::from_str(&format!("layout = \"grouped\"{PROFILE}")).unwrap();
+            toml::from_str(&format!("layout = \"by-queue\"{PROFILE}")).unwrap();
         profile.root = root.path().to_path_buf();
         let app = App::new(profile).unwrap();
 
-        assert_eq!(app.layout, crate::config::Layout::Grouped);
+        assert_eq!(app.layout, Layout::ByQueue);
         assert!(app.rows.iter().any(|row| matches!(row, Row::Group { .. })));
     }
 
@@ -1425,7 +1532,7 @@ label   = "id"
         tap(&mut app, KeyCode::Down);
         tap(&mut app, KeyCode::Enter);
 
-        assert_eq!(app.layout, Layout::Grouped);
+        assert_eq!(app.layout, Layout::ByQueue);
         assert!(app.rows.iter().any(|row| matches!(row, Row::Group { .. })));
     }
 
@@ -1498,6 +1605,101 @@ label   = "id"
     fn the_queues_section_stays_hidden_when_there_is_only_one() {
         let (_root, app) = fixture();
         assert!(app.sections().iter().all(|s| s.title != "queues"));
+    }
+
+    fn keys_tab(app: &mut App) {
+        open_settings(app);
+        let sections = app.sections();
+        let at = sections.iter().position(|s| s.title == "keys").unwrap();
+        app.panel.as_mut().unwrap().tab = at;
+        app.panel.as_mut().unwrap().cursor = 0;
+    }
+
+    #[test]
+    fn a_key_can_be_rebound_from_the_panel() {
+        let (_root, mut app) = fixture();
+        keys_tab(&mut app);
+
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.panel.as_ref().unwrap().capturing.as_deref(),
+            Some("down")
+        );
+
+        tap(&mut app, KeyCode::Char('n'));
+        assert!(app.panel.as_ref().unwrap().capturing.is_none());
+        app.panel = None;
+
+        let before = app.cursor;
+        tap(&mut app, KeyCode::Char('n'));
+        assert_ne!(app.cursor, before, "the new key does not move the cursor");
+
+        tap(&mut app, KeyCode::Char('j'));
+        assert_eq!(app.cursor, before + 1, "the old key still moves the cursor");
+    }
+
+    #[test]
+    fn escaping_a_capture_leaves_the_binding_alone() {
+        let (_root, mut app) = fixture();
+        keys_tab(&mut app);
+
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::Esc);
+        assert!(app.panel.as_ref().unwrap().capturing.is_none());
+
+        app.panel = None;
+        let before = app.cursor;
+        tap(&mut app, KeyCode::Char('j'));
+        assert_ne!(app.cursor, before);
+    }
+
+    #[test]
+    fn a_key_an_action_already_owns_is_refused() {
+        let (_root, mut app) = fixture();
+        keys_tab(&mut app);
+
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::Char('d'));
+
+        assert!(
+            app.message
+                .as_deref()
+                .unwrap()
+                .contains("already runs an action")
+        );
+        app.panel = None;
+        let before = app.cursor;
+        tap(&mut app, KeyCode::Char('j'));
+        assert_ne!(app.cursor, before, "the binding should not have moved");
+    }
+
+    #[test]
+    fn what_the_panel_changes_is_written_down_and_comes_back() {
+        let (root, mut app) = fixture();
+        let book = root.path().join("remembered.toml");
+        app.name = "fixture".to_string();
+        app.book_path = Some(book.clone());
+
+        open_settings(&mut app);
+        tap(&mut app, KeyCode::Down);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(app.layout, Layout::ByQueue);
+        assert!(book.exists(), "nothing was written");
+
+        let read = Book::read(&book).of("fixture");
+        assert_eq!(read.layout, Some(Layout::ByQueue));
+    }
+
+    #[test]
+    fn nothing_is_written_when_there_is_nowhere_to_write_it() {
+        let (_root, mut app) = fixture();
+        app.book_path = None;
+
+        open_settings(&mut app);
+        tap(&mut app, KeyCode::Down);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(app.layout, Layout::ByQueue);
+        assert!(app.message.is_none());
     }
 
     #[test]

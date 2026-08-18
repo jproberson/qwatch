@@ -2,7 +2,7 @@ use crate::keys::{Binding, Keys};
 use crate::name::{DirTemplate, NameTemplate, Pattern};
 use crate::preview::Preview;
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -374,27 +374,44 @@ pub enum ActionKind {
     Edit,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Layout {
     #[default]
     Table,
-    Grouped,
+    ByQueue,
+    ByStatus,
 }
 
 impl Layout {
-    pub fn other(self) -> Self {
+    pub const ALL: [Layout; 3] = [Layout::Table, Layout::ByQueue, Layout::ByStatus];
+
+    pub fn next(self) -> Self {
         match self {
-            Layout::Table => Layout::Grouped,
-            Layout::Grouped => Layout::Table,
+            Layout::Table => Layout::ByQueue,
+            Layout::ByQueue => Layout::ByStatus,
+            Layout::ByStatus => Layout::Table,
         }
     }
 
     pub fn named(self) -> &'static str {
         match self {
             Layout::Table => "table",
-            Layout::Grouped => "grouped",
+            Layout::ByQueue => "by queue",
+            Layout::ByStatus => "by status",
         }
+    }
+
+    pub fn heads_groups(self) -> bool {
+        self != Layout::Table
+    }
+
+    pub fn shows_queue(self) -> bool {
+        self != Layout::ByQueue
+    }
+
+    pub fn shows_status(self) -> bool {
+        self != Layout::ByStatus
     }
 }
 

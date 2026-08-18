@@ -1,10 +1,10 @@
 use crate::config::{Layout, Profile};
 use crate::scan::{Entry, Queue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Order {
     #[default]
@@ -52,11 +52,64 @@ impl Row {
 pub fn build(profile: &Profile, queues: &[Queue], order: Order, layout: Layout) -> Vec<Row> {
     match layout {
         Layout::Table => flat(profile, queues, order),
-        Layout::Grouped => grouped(profile, queues, order),
+        Layout::ByQueue => by_queue(profile, queues, order),
+        Layout::ByStatus => by_status(profile, queues, order),
     }
 }
 
-fn grouped(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
+fn by_status(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
+    let ranks = state_ranks(profile);
+    let mut buckets: BTreeMap<String, Vec<Entry>> = BTreeMap::new();
+    for entry in queues.iter().flat_map(Queue::entries) {
+        buckets
+            .entry(entry.status.clone())
+            .or_default()
+            .push(entry.clone());
+    }
+
+    let mut groups: Vec<(String, Vec<Entry>)> = buckets.into_iter().collect();
+    groups.sort_by_key(|(status, entries)| {
+        let rank = entries
+            .first()
+            .map(|entry| rank_of(&ranks, &entry.state))
+            .unwrap_or(usize::MAX);
+        (rank, status.clone())
+    });
+
+    if groups.is_empty() {
+        return vec![Row::Empty(String::new())];
+    }
+
+    let mut rows = Vec::new();
+    for (status, mut entries) in groups {
+        if !rows.is_empty() {
+            rows.push(Row::Blank);
+        }
+        rows.push(Row::Group {
+            name: status,
+            tally: counted(entries.len()),
+        });
+        match order {
+            Order::Queue => entries.sort_by(|left, right| {
+                left.queue
+                    .cmp(&right.queue)
+                    .then_with(|| left.modified.cmp(&right.modified))
+            }),
+            _ => sorted(&mut entries, profile, order),
+        }
+        rows.extend(entries.into_iter().map(into_row));
+    }
+    rows
+}
+
+fn counted(files: usize) -> String {
+    match files {
+        1 => "1 file".to_string(),
+        many => format!("{many} files"),
+    }
+}
+
+fn by_queue(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
     let mut rows = Vec::new();
 
     for queue in queues {
@@ -347,7 +400,7 @@ label    = "{job}"
 
     #[test]
     fn the_grouped_layout_heads_each_queue_with_its_own_tally() {
-        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        let rows = populated().laid_out(Order::Queue, Layout::ByQueue);
         assert_eq!(
             shape(&rows),
             [
@@ -364,13 +417,13 @@ label    = "{job}"
 
     #[test]
     fn the_grouped_layout_has_no_column_header() {
-        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        let rows = populated().laid_out(Order::Queue, Layout::ByQueue);
         assert!(!rows.contains(&Row::Columns));
     }
 
     #[test]
     fn the_cursor_still_only_rests_on_files_when_grouped() {
-        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        let rows = populated().laid_out(Order::Queue, Layout::ByQueue);
         let mut cursor = first_file(&rows).unwrap();
         for _ in 0..10 {
             cursor = step(&rows, cursor, 1).unwrap();
@@ -381,12 +434,59 @@ label    = "{job}"
 
     #[test]
     fn sorting_inside_a_group_leaves_the_groups_intact() {
-        let rows = populated().laid_out(Order::Status, Layout::Grouped);
+        let rows = populated().laid_out(Order::Status, Layout::ByQueue);
         let headings: Vec<String> = shape(&rows)
             .into_iter()
             .filter(|line| line.starts_with("group "))
             .collect();
         assert_eq!(headings.len(), 2);
+    }
+
+    #[test]
+    fn by_status_gathers_a_status_across_every_queue() {
+        let rows = populated().laid_out(Order::Queue, Layout::ByStatus);
+        assert_eq!(
+            shape(&rows),
+            [
+                "group failed (2 files)",
+                "receipts failed ParseInvoice",
+                "receipts failed ExtractTotals",
+                "blank",
+                "group queued (1 file)",
+                "receipts queued RenderReport",
+            ]
+        );
+    }
+
+    #[test]
+    fn by_status_puts_the_status_that_needs_attention_first() {
+        let rows = populated().laid_out(Order::Queue, Layout::ByStatus);
+        let first = rows
+            .iter()
+            .find_map(|row| match row {
+                Row::Group { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(first, "failed");
+    }
+
+    #[test]
+    fn by_status_says_so_when_there_is_nothing_at_all() {
+        let fixture = Fixture::new(&[("invoices", &[]), ("invoices-failed", &[])]);
+        let rows = fixture.laid_out(Order::Queue, Layout::ByStatus);
+        assert_eq!(rows, [Row::Empty(String::new())]);
+        assert_eq!(first_file(&rows), None);
+    }
+
+    #[test]
+    fn the_cursor_still_only_rests_on_files_when_grouped_by_status() {
+        let rows = populated().laid_out(Order::Queue, Layout::ByStatus);
+        let mut cursor = first_file(&rows).unwrap();
+        for _ in 0..8 {
+            cursor = step(&rows, cursor, 1).unwrap();
+            assert!(rows[cursor].entry().is_some());
+        }
     }
 
     #[test]

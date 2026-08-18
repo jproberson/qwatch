@@ -4,6 +4,7 @@ mod init;
 mod keys;
 mod name;
 mod preview;
+mod remember;
 mod scan;
 mod status;
 mod ui;
@@ -71,8 +72,8 @@ fn main() -> Result<()> {
         return write_starter_config(directory, print, output);
     }
 
-    let (profile, catalogue) = chosen_profile(&options)?;
-    let queues = scan::scan(&profile)?;
+    let chosen = chosen_profile(&options)?;
+    let queues = scan::scan(&chosen.profile)?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&queues)?);
@@ -82,12 +83,26 @@ fn main() -> Result<()> {
         print_listing(&queues);
         return Ok(());
     }
-    ui::run(profile, catalogue)
+    ui::run(chosen.profile, chosen.catalogue, chosen.name, chosen.book)
 }
 
-fn chosen_profile(options: &Options) -> Result<(Profile, BTreeMap<String, Profile>)> {
+struct Chosen {
+    profile: Profile,
+    catalogue: BTreeMap<String, Profile>,
+    name: String,
+    book: Option<PathBuf>,
+}
+
+fn chosen_profile(options: &Options) -> Result<Chosen> {
     if let Some(directory) = &options.directory {
-        return Ok((Profile::for_directory(directory), BTreeMap::new()));
+        return Ok(Chosen {
+            profile: Profile::for_directory(directory),
+            catalogue: BTreeMap::new(),
+            name: directory.display().to_string(),
+            book: config::default_config_path()
+                .as_deref()
+                .map(remember::beside),
+        });
     }
 
     let path = match &options.config {
@@ -102,7 +117,19 @@ fn chosen_profile(options: &Options) -> Result<(Profile, BTreeMap<String, Profil
     }
     let config = Config::load(&path)?;
     let profile = config.select(options.profile.as_deref())?.clone();
-    Ok((profile, config.profile))
+    let name = config
+        .profile
+        .iter()
+        .find(|(_, other)| other.root == profile.root)
+        .map(|(name, _)| name.clone())
+        .unwrap_or_else(|| "default".to_string());
+
+    Ok(Chosen {
+        profile,
+        catalogue: config.profile,
+        name,
+        book: Some(remember::beside(&path)),
+    })
 }
 
 fn print_listing(queues: &[Queue]) {

@@ -38,6 +38,32 @@ impl Binding {
         })
     }
 
+    pub fn of(event: KeyEvent) -> Option<Self> {
+        let usable = matches!(
+            event.code,
+            KeyCode::Char(_)
+                | KeyCode::F(_)
+                | KeyCode::Enter
+                | KeyCode::Tab
+                | KeyCode::BackTab
+                | KeyCode::Backspace
+                | KeyCode::Delete
+                | KeyCode::Insert
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+        );
+        usable.then_some(Self {
+            code: event.code,
+            modifiers: event.modifiers - KeyModifiers::SHIFT,
+        })
+    }
+
     pub fn matches(self, event: KeyEvent) -> bool {
         let wanted = self.modifiers - KeyModifiers::SHIFT;
         let given = event.modifiers - KeyModifiers::SHIFT;
@@ -166,6 +192,22 @@ macro_rules! keymap {
             pub fn claims(&self, binding: Binding) -> bool {
                 $(if self.$field.contains(&binding) { return true; })*
                 false
+            }
+
+            pub fn motions(&self) -> Vec<(&'static str, String, &'static str)> {
+                vec![$((stringify!($field), shown(&self.$field), $label),)*]
+            }
+
+            pub fn rebind(&mut self, motion: &str, binding: Binding) -> bool {
+                $(if motion == stringify!($field) { self.$field = vec![binding]; return true; })*
+                false
+            }
+
+            pub fn written(&self, motion: &str) -> Option<Vec<String>> {
+                $(if motion == stringify!($field) {
+                    return Some(self.$field.iter().map(|b| b.written()).collect());
+                })*
+                None
             }
         }
     };

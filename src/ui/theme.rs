@@ -74,6 +74,10 @@ impl Theme {
         Style::default().add_modifier(Modifier::DIM)
     }
 
+    pub fn awake(self) -> Style {
+        Style::default().remove_modifier(Modifier::DIM)
+    }
+
     pub fn notice(self) -> Style {
         self.paint(Style::default().fg(Color::Yellow))
     }
