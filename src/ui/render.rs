@@ -381,7 +381,7 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
             app.theme.notice(),
         ),
         (_, Some(_)) => (
-            "type a path, enter to go there, esc to stay".to_string(),
+            "type a path, enter to apply, esc to cancel".to_string(),
             app.theme.notice(),
         ),
         _ => (

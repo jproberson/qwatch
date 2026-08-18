@@ -391,7 +391,7 @@ impl App {
             },
             Section {
                 title: "sort".to_string(),
-                note: "what decides the order".to_string(),
+                note: "what the list is ordered by".to_string(),
                 entries: [Order::Queue, Order::Age, Order::Status]
                     .into_iter()
                     .map(|order| choosing(order.label(), self.order == order, Choice::Sort(order)))
@@ -401,7 +401,7 @@ impl App {
 
         sections.push(Section {
             title: "directory".to_string(),
-            note: "enter to edit, enter again to go there".to_string(),
+            note: "enter to edit, enter again to apply".to_string(),
             entries: vec![choosing(&shortened(&self.profile.root), true, Choice::Root)],
         });
 
@@ -415,7 +415,7 @@ impl App {
         });
         sections.push(Section {
             title: "about".to_string(),
-            note: "nothing here rewrites your files".to_string(),
+            note: "an update replaces the program, not your config".to_string(),
             entries: vec![
                 telling(format!("{:<12} {}", "installed", crate::update::VERSION)),
                 telling(format!(

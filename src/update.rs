@@ -20,7 +20,7 @@ pub fn run() -> Result<()> {
     };
 
     println!("running cargo install --git {url} --force");
-    println!("your config and remembered settings are not touched by this\n");
+    println!("this replaces the program only. Your config is left alone\n");
 
     let finished = Command::new("cargo")
         .args(["install", "--git", url, "--force"])
