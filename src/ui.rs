@@ -1741,6 +1741,25 @@ label   = "id"
     }
 
     #[test]
+    fn the_settings_panel_leaves_a_gap_below_its_last_option() {
+        let (_root, mut app) = fixture();
+        app.panel = Some(Panel::opened_at(&app.sections()));
+
+        let painted = screen(&mut app, 92, 20);
+        let lines: Vec<&str> = painted.lines().collect();
+        let bottom = lines
+            .iter()
+            .position(|line| line.contains("esc close"))
+            .expect("no hint line");
+        let above = lines[bottom - 1];
+
+        assert!(
+            above.trim_matches(['│', ' ']).is_empty(),
+            "the last option is flush against the border: {above:?}"
+        );
+    }
+
+    #[test]
     fn the_cursor_opens_on_the_first_file() {
         let (_root, app) = fixture();
         assert!(app.selected().is_some());

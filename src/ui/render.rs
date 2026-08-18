@@ -350,7 +350,7 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
         .unwrap_or(40) as u16;
 
     let width = (widest + 4).clamp(40, area.width.min(PANEL_CAP));
-    let height = (rows + 6).clamp(8, area.height);
+    let height = (rows + 7).clamp(8, area.height);
     let popup = Rect {
         x: area.x + (area.width.saturating_sub(width)) / 2,
         y: area.y + (area.height.saturating_sub(height)) / 2,
@@ -361,7 +361,7 @@ fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Pane
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(app.theme.title())
-        .padding(Padding::horizontal(1))
+        .padding(Padding::new(1, 1, 0, 1))
         .title(Span::styled(" settings ", app.theme.title()))
         .title_bottom(Line::from(Span::styled(HINTS, app.theme.muted())).centered());
     let inner = block.inner(popup);
