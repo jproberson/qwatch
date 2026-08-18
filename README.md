@@ -149,7 +149,7 @@ Finder and choose Open, or run `xattr -d com.apple.quarantine /usr/local/bin/qwa
 **With cargo**, if you have Rust:
 
 ```
-cargo install --git https://github.com/OWNER/qwatch
+cargo install --git https://github.com/jproberson/qwatch
 ```
 
 **From a checkout:**
