@@ -242,8 +242,7 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
     }
 
     let keys = &app.profile.keys;
-    let head = format!(" {} move", pair(&keys.down, &keys.up));
-    let head_cost = head.chars().count() + 2;
+    let head_cost = 1;
     let tail = [
         format!(
             "{} settings  {} help  {} quit",
@@ -278,7 +277,7 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
     };
 
     let mut used = fixed;
-    let mut parts = vec![head];
+    let mut parts: Vec<String> = Vec::new();
     let mut hidden = false;
 
     for part in optional {
@@ -296,7 +295,10 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
     }
     parts.push(tail);
 
-    Line::from(Span::styled(parts.join("  "), app.theme.muted()))
+    Line::from(Span::styled(
+        format!(" {}", parts.join("  ")),
+        app.theme.muted(),
+    ))
 }
 
 fn first_of(bindings: &[crate::keys::Binding]) -> String {
@@ -304,10 +306,6 @@ fn first_of(bindings: &[crate::keys::Binding]) -> String {
         .first()
         .map(|binding| binding.written())
         .unwrap_or_default()
-}
-
-fn pair(left: &[crate::keys::Binding], right: &[crate::keys::Binding]) -> String {
-    format!("{}/{}", first_of(left), first_of(right))
 }
 
 fn help_lines(app: &App) -> Vec<Line<'static>> {
