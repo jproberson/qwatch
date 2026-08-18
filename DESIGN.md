@@ -483,18 +483,23 @@ Asking for the browser without a terminal says so instead of panicking, which is
 what happens if the terminal is initialised anyway. Colour follows `NO_COLOR`,
 and `--no-color` says the same thing on the command line.
 
-An update announces itself rather than waiting to be found. A build records the
-commit it came from, and a background `git ls-remote` compares it against the
-repository's head: 219 bytes and a third of a second, with no HTTP client, no
-API and no auth, because git is already required to install the thing. The
-footer's `ctrl-s settings` becomes `ctrl-s update ready`, and the about section
-says so beside the version. A failed check says nothing at all, and
-`update_check = false` turns it off.
+An update announces itself rather than waiting to be found. A background
+`git ls-remote --tags` reads the released versions and compares the highest
+against the one built in: a couple of hundred bytes and a third of a second,
+with no HTTP client, no API and no auth, because git is already required to
+install the thing. The footer's `ctrl-s settings` becomes `ctrl-s update ready`,
+and the about section says so beside the version. A failed check says nothing at
+all, and `update_check = false` turns it off.
 
-Commits are compared rather than versions. Versions only move when one is cut,
-so a version check would report "up to date" through a dozen fixes. The cost is
-that a documentation commit also reads as an update, which is noisy but true,
-and true is the better failure.
+Tags rather than commits, which puts an obligation on whoever pushes: **cut a
+tag when a change is worth someone updating for.** Comparing commits needs no
+such discipline and was tried first, but it announces a fixed typo as loudly as
+a fixed bug, and an indicator that cries wolf is worse than none. A version is a
+claim that something changed for the reader; a commit is only a claim that
+something changed.
+
+A tag that is not a version is ignored, so `nightly` and `v1.2.beta` cost
+nothing.
 
 The about section of the settings panel updates in place: it leaves the
 terminal, runs the same `cargo install --git` a reader would type, and says to

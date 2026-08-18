@@ -139,7 +139,7 @@ You need Rust. [rustup.rs](https://rustup.rs) if you have not got it.
 cargo install --git https://github.com/jproberson/qwatch
 ```
 
-qwatch notices when a newer build exists and says so in its footer. Run the same
+qwatch notices when a newer version has been released and says so in its footer. Run the same
 command again to update, or open `ctrl-s` and pick **about**, which does it for
 you. Set `update_check = false` in a profile to stop it looking. Either way your config and settings are left alone: cargo
 replaces a binary and never touches `~/.config/qwatch`. From a checkout,

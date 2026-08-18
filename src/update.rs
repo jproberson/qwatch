@@ -3,8 +3,25 @@ use std::process::Command;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn installed_commit() -> Option<&'static str> {
-    option_env!("QWATCH_COMMIT").filter(|sha| sha.len() >= 7)
+pub type Version = (u32, u32, u32);
+
+pub fn installed() -> Option<Version> {
+    read_version(VERSION)
+}
+
+fn read_version(text: &str) -> Option<Version> {
+    let parts: Vec<&str> = text.trim().trim_start_matches('v').split('.').collect();
+    if !(2..=3).contains(&parts.len()) {
+        return None;
+    }
+    let mut numbers = parts.iter().map(|part| part.parse::<u32>().ok());
+    let major = numbers.next()??;
+    let minor = numbers.next()??;
+    let patch = match numbers.next() {
+        Some(given) => given?,
+        None => 0,
+    };
+    Some((major, minor, patch))
 }
 
 pub fn source() -> Option<&'static str> {
@@ -18,24 +35,28 @@ pub fn described() -> String {
     }
 }
 
-pub fn newest_commit(url: &str) -> Option<String> {
+pub fn newest_released(url: &str) -> Option<Version> {
     let asked = Command::new("git")
-        .args(["ls-remote", url, "HEAD"])
+        .args(["ls-remote", "--tags", "--refs", url])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .ok()?;
-    if !asked.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&asked.stdout)
-        .split_whitespace()
-        .next()
-        .map(str::to_string)
+    asked.status.success().then_some(())?;
+
+    highest(&String::from_utf8_lossy(&asked.stdout))
 }
 
-pub fn behind(installed: Option<&str>, newest: Option<&str>) -> bool {
+pub fn highest(advertised: &str) -> Option<Version> {
+    advertised
+        .lines()
+        .filter_map(|line| line.rsplit("refs/tags/").next())
+        .filter_map(read_version)
+        .max()
+}
+
+pub fn behind(installed: Option<Version>, newest: Option<Version>) -> bool {
     match (installed, newest) {
-        (Some(here), Some(there)) => here != there,
+        (Some(here), Some(there)) => there > here,
         _ => false,
     }
 }
@@ -46,8 +67,7 @@ pub fn look_for_one() -> std::sync::mpsc::Receiver<bool> {
         let Some(url) = source() else {
             return;
         };
-        let newest = newest_commit(url);
-        let _ = teller.send(behind(installed_commit(), newest.as_deref()));
+        let _ = teller.send(behind(installed(), newest_released(url)));
     });
     told
 }
@@ -87,19 +107,51 @@ mod tests {
     }
 
     #[test]
-    fn it_is_only_behind_when_it_knows_both_ends() {
-        assert!(behind(Some("aaaa"), Some("bbbb")));
-        assert!(!behind(Some("aaaa"), Some("aaaa")));
-        assert!(!behind(None, Some("bbbb")));
-        assert!(!behind(Some("aaaa"), None));
-        assert!(!behind(None, None));
+    fn it_is_behind_only_when_the_newest_is_actually_newer() {
+        assert!(behind(Some((0, 1, 1)), Some((0, 1, 2))));
+        assert!(behind(Some((0, 1, 9)), Some((0, 2, 0))));
+        assert!(!behind(Some((0, 1, 2)), Some((0, 1, 2))));
+        assert!(!behind(Some((0, 2, 0)), Some((0, 1, 9))));
+        assert!(!behind(None, Some((9, 9, 9))));
+        assert!(!behind(Some((0, 1, 1)), None));
     }
 
     #[test]
-    fn a_build_from_a_checkout_knows_its_commit() {
-        let sha = installed_commit().expect("no commit recorded");
-        assert_eq!(sha.len(), 40, "not a full sha: {sha}");
-        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    fn it_reads_a_version_off_a_tag_however_it_is_written() {
+        assert_eq!(read_version("v0.1.2"), Some((0, 1, 2)));
+        assert_eq!(read_version("0.1.2"), Some((0, 1, 2)));
+        assert_eq!(read_version("1.10.0"), Some((1, 10, 0)));
+        assert_eq!(read_version("2.3"), Some((2, 3, 0)));
+    }
+
+    #[test]
+    fn it_ignores_a_tag_that_is_not_a_version() {
+        assert_eq!(read_version("nightly"), None);
+        assert_eq!(read_version("v1.2.3.4"), None);
+        assert_eq!(read_version("v1.2.beta"), None);
+        assert_eq!(read_version(""), None);
+    }
+
+    #[test]
+    fn it_takes_the_highest_tag_not_the_last_one_listed() {
+        let advertised = "\
+aaaa\trefs/tags/v0.1.0
+bbbb\trefs/tags/v0.2.0
+cccc\trefs/tags/v0.1.9
+dddd\trefs/tags/nightly
+";
+        assert_eq!(highest(advertised), Some((0, 2, 0)));
+    }
+
+    #[test]
+    fn it_finds_nothing_in_an_empty_advertisement() {
+        assert_eq!(highest(""), None);
+    }
+
+    #[test]
+    fn it_knows_the_version_it_was_built_as() {
+        assert_eq!(installed(), read_version(VERSION));
+        assert!(installed().is_some());
     }
 
     #[test]
