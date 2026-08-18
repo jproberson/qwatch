@@ -133,30 +133,14 @@ quit = ["ctrl-c"]        # this frees up `q` for an action of your own
 
 ## Install
 
-Pick whichever is least annoying.
-
-**A prebuilt binary.** Grab the `.tar.gz` for your Mac from the releases page,
-unpack it, and put `qwatch` somewhere on your `PATH`:
-
-```
-tar xzf qwatch-aarch64-apple-darwin.tar.gz    # x86_64- on an Intel Mac
-mv qwatch /usr/local/bin/
-```
-
-macOS will refuse to run an unsigned download the first time. Right-click it in
-Finder and choose Open, or run `xattr -d com.apple.quarantine /usr/local/bin/qwatch`.
-
-**With cargo**, if you have Rust:
+You need Rust. [rustup.rs](https://rustup.rs) if you have not got it.
 
 ```
 cargo install --git https://github.com/jproberson/qwatch
 ```
 
-**From a checkout:**
-
-```
-cargo install --path .
-```
+Run the same command again to update. From a checkout, `cargo install --path .`
+does the same thing.
 
 Then `qwatch init <your queue directory>` to write a starting config, and
 `qwatch` to browse it.

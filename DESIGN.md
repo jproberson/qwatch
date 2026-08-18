@@ -483,6 +483,11 @@ Asking for the browser without a terminal says so instead of panicking, which is
 what happens if the terminal is initialised anyway. Colour follows `NO_COLOR`,
 and `--no-color` says the same thing on the command line.
 
+Installation is `cargo install --git` and nothing else. Shipping prebuilt Macs
+binaries means either signing them or telling every reader to strip a quarantine
+attribute off a download, and a stale binary attached to an old tag is worse
+than no binary at all, because it looks current.
+
 Listing is a flag rather than a subcommand because it modifies the same
 operation. `init` is a subcommand because it is a different one: it writes a
 config and never browses. The cost is that a directory literally named `init`
