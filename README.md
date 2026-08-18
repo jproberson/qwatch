@@ -91,10 +91,13 @@ type  = "delete"
 scope = "all"        # or queue, status, job
 ```
 
-`scope = "job"` deletes every file with the same label as the one you are on,
-`scope = "status"` restarts everything that failed. Guards still run per file,
-so a file that refuses is skipped and counted rather than stopping the rest, and
-the prompt tells you how many of each before anything happens.
+Each one is labelled by what it would do to the row you are on, so the footer
+reads `delete 2 ParseInvoice` and `restart 3 failed` rather than something vague
+about scopes, and the counts follow the cursor.
+
+Guards still run per file, so one that refuses is skipped and counted rather
+than stopping the rest, and the prompt tells you how many of each before
+anything happens.
 
 ## Keys
 

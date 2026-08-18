@@ -147,10 +147,13 @@ single work: point at a file, then say how far the action reaches.
 | Scope | Reaches |
 | --- | --- |
 | `one` | The file under the cursor. The default |
-| `all` | Every file listed |
-| `queue` | Every file in the same queue |
 | `status` | Every file with the same status |
-| `job` | Every file with the same label |
+| `all` | Every file listed |
+
+Three, because those are the three questions worth asking of a stuck queue:
+this one, everything that failed the same way, everything. Scoping by queue or
+by job name was written and then taken out again: both read as plausible, and
+neither answered a question the other two did not.
 
 ```toml
 [[profile.ingest.action]]
@@ -159,6 +162,14 @@ name  = "delete"
 type  = "delete"
 scope = "all"
 ```
+
+A scoped action is labelled by what it would do to the row under the cursor
+rather than by the name of its scope, so the footer reads `delete 2 ParseInvoice`
+and `restart 3 failed`, and the counts move as the cursor does. Naming them by
+scope instead (`delete status`, `delete all`) tells the reader nothing: two keys
+both read as some flavour of delete, and when only one file carries that status
+the wider one is genuinely identical to the narrow one, which the count admits
+and a scope name hides.
 
 Every guard still runs per file, and a file that refuses is skipped rather than
 failing the batch, because "restart everything that failed" should not be

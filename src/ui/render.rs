@@ -225,7 +225,7 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
         .profile
         .action
         .iter()
-        .map(|action| format!("{} {}", action.key, labelled(action)))
+        .map(|action| format!("{} {}", action.key, app.labelled(action)))
         .collect();
     optional.push(format!("{} rescan", first_of(&keys.rescan)));
     optional.push(format!(
@@ -272,7 +272,7 @@ fn help_lines(app: &App) -> Vec<Line<'static>> {
         .profile
         .action
         .iter()
-        .map(|action| key_line(app, &action.key, &labelled(action)))
+        .map(|action| key_line(app, &action.key, &app.labelled(action)))
         .collect();
     lines.extend(
         app.profile
@@ -282,13 +282,6 @@ fn help_lines(app: &App) -> Vec<Line<'static>> {
             .map(|(keys, meaning)| key_line(app, &keys, meaning)),
     );
     lines
-}
-
-fn labelled(action: &crate::config::Action) -> String {
-    match action.scope {
-        crate::config::Scope::One => action.name.clone(),
-        scope => format!("{} {}", action.name, scope.named()),
-    }
 }
 
 fn key_line(app: &App, key: &str, meaning: &str) -> Line<'static> {

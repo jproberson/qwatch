@@ -377,21 +377,7 @@ pub enum Scope {
     #[default]
     One,
     All,
-    Queue,
     Status,
-    Job,
-}
-
-impl Scope {
-    pub fn named(self) -> &'static str {
-        match self {
-            Scope::One => "one",
-            Scope::All => "all",
-            Scope::Queue => "queue",
-            Scope::Status => "status",
-            Scope::Job => "job",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

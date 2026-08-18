@@ -183,22 +183,33 @@ impl App {
             .map(|(_, action)| action.clone())
     }
 
-    fn in_scope(&self, scope: Scope) -> Vec<Entry> {
-        let Some(selected) = self.selected() else {
-            return Vec::new();
-        };
+    fn reached_by(&self, scope: Scope) -> impl Iterator<Item = &Entry> {
+        let selected = self.selected();
         self.rows
             .iter()
             .filter_map(Row::entry)
-            .filter(|entry| match scope {
-                Scope::One => entry.path == selected.path,
-                Scope::All => true,
-                Scope::Queue => entry.queue == selected.queue,
-                Scope::Status => entry.status == selected.status,
-                Scope::Job => entry.label == selected.label,
+            .filter(move |entry| match (selected, scope) {
+                (None, _) => false,
+                (Some(_), Scope::All) => true,
+                (Some(on), Scope::One) => entry.path == on.path,
+                (Some(on), Scope::Status) => entry.status == on.status,
             })
-            .cloned()
-            .collect()
+    }
+
+    fn in_scope(&self, scope: Scope) -> Vec<Entry> {
+        self.reached_by(scope).cloned().collect()
+    }
+
+    pub fn labelled(&self, action: &Action) -> String {
+        let reach = self.reached_by(action.scope).count();
+        let Some(on) = self.selected() else {
+            return action.name.clone();
+        };
+        match action.scope {
+            Scope::One => action.name.clone(),
+            Scope::All => format!("{} all {reach}", action.name),
+            Scope::Status => format!("{} {reach} {}", action.name, on.status),
+        }
     }
 
     fn begin(&mut self, action: &Action) {
@@ -268,9 +279,7 @@ impl App {
             return String::new();
         };
         match scope {
-            Scope::Queue => format!(" in {}", selected.queue),
             Scope::Status => format!(" that are {}", selected.status),
-            Scope::Job => format!(" of {}", selected.label),
             _ => String::new(),
         }
     }
@@ -613,7 +622,7 @@ scope = "all"
 key   = "X"
 name  = "delete"
 type  = "delete"
-scope = "job"
+scope = "status"
 
 [[action]]
 key      = "A"
@@ -995,38 +1004,27 @@ label   = "id"
     }
 
     #[test]
-    fn deleting_by_job_takes_only_the_ones_with_that_name() {
+    fn deleting_by_status_takes_every_failure_and_leaves_the_rest() {
         let (root, mut app) = fixture();
-        std::fs::write(
-            root.path().join("receipts/x_ParseInvoice-7.txt"),
-            "ParseInvoice,7",
-        )
-        .unwrap();
-        app.rescan().unwrap();
-
-        let target = app
+        app.cursor = app
             .rows
             .iter()
-            .position(|row| {
-                row.entry()
-                    .is_some_and(|entry| entry.label == "ParseInvoice")
-            })
+            .position(|row| row.entry().is_some_and(|entry| entry.status == "failed"))
             .unwrap();
-        app.cursor = target;
 
         press(&mut app, 'X');
         assert_eq!(
             app.prompt.as_ref().unwrap().question,
-            "delete 2 files of ParseInvoice?"
+            "delete 2 files that are failed?"
         );
 
         app.answer(KeyCode::Char('y'));
-        assert_eq!(files_left(&root), 2);
+        assert_eq!(files_left(&root), 1);
         assert!(
             app.rows
                 .iter()
                 .filter_map(Row::entry)
-                .all(|e| e.label != "ParseInvoice")
+                .all(|entry| entry.status != "failed")
         );
     }
 
@@ -1107,6 +1105,48 @@ label   = "id"
         let (_root, mut app) = fixture();
         assert!(footer_of(&mut app, 50).contains('\u{2026}'));
         assert!(!footer_of(&mut app, 200).contains('\u{2026}'));
+    }
+
+    #[test]
+    fn an_action_label_says_what_it_will_reach() {
+        let (root, mut app) = fixture();
+        std::fs::write(root.path().join("receipts/x_ParseInvoice-7.txt"), "").unwrap();
+        app.rescan().unwrap();
+        app.cursor = app
+            .rows
+            .iter()
+            .position(|row| {
+                row.entry()
+                    .is_some_and(|entry| entry.label == "ParseInvoice")
+            })
+            .unwrap();
+
+        let labelled = |key: char| {
+            let action = app
+                .action_for(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE))
+                .unwrap();
+            app.labelled(&action)
+        };
+
+        assert_eq!(labelled('d'), "delete");
+        assert_eq!(labelled('D'), "delete all 4");
+        assert_eq!(labelled('X'), "delete 2 failed");
+        assert_eq!(labelled('A'), "restart 2 failed");
+    }
+
+    #[test]
+    fn a_label_counts_only_what_the_scope_reaches() {
+        let (_root, mut app) = fixture();
+        app.cursor = app
+            .rows
+            .iter()
+            .position(|row| row.entry().is_some_and(|entry| entry.status == "waiting"))
+            .unwrap();
+
+        let restart_status = app
+            .action_for(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.labelled(&restart_status), "restart 1 waiting");
     }
 
     #[test]
