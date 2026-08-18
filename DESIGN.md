@@ -338,11 +338,14 @@ to be a file.
      waiting  RenderReport #0                      2d
 ```
 
-`by-status` gathers a status across every queue, drops the status column, and
-keeps the queue one, which answers "show me everything that is stuck" in one
-glance regardless of where it is stuck. Statuses that need attention head the
-list, and a status with no files simply has no heading, since there is nothing
-to say about it.
+`by-status` gathers a status across every queue, drops the status column since
+the heading carries it, and keeps the queue one, which answers "show me everything that is stuck" in one
+glance regardless of where it is stuck. Statuses that need attention head the list, and a status
+with no files simply has no heading, since there is nothing to say about it.
+
+A heading is painted by what it names: a status heading takes that status's own
+colour, so red still means dead once the status column is gone. Dropping a
+column must not drop the meaning that column carried.
 
 ```
  failed                                       2 files

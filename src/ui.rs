@@ -1703,6 +1703,53 @@ label   = "id"
     }
 
     #[test]
+    fn a_status_heading_is_painted_like_the_status_it_names() {
+        use crate::ui::table::Heading;
+
+        let (_root, mut app) = fixture();
+        app.theme = Theme::default();
+        app.layout = Layout::ByStatus;
+        app.relist();
+
+        let headings: Vec<(String, Heading)> = app
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Group { name, kind, .. } => Some((name.clone(), *kind)),
+                _ => None,
+            })
+            .collect();
+        assert!(headings.iter().all(|(_, kind)| *kind == Heading::Status));
+
+        let painted: Vec<_> = headings
+            .iter()
+            .map(|(name, _)| app.theme.status(app.color_of(name)))
+            .collect();
+        assert_ne!(
+            painted[0], painted[1],
+            "failed and queued headings look the same"
+        );
+        assert_eq!(painted[0], app.theme.status(app.color_of("failed")));
+    }
+
+    #[test]
+    fn a_queue_heading_is_not_painted_like_a_status() {
+        use crate::ui::table::Heading;
+
+        let (_root, mut app) = fixture();
+        app.layout = Layout::ByQueue;
+        app.relist();
+
+        assert!(app.rows.iter().all(|row| !matches!(
+            row,
+            Row::Group {
+                kind: Heading::Status,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn the_cursor_opens_on_the_first_file() {
         let (_root, app) = fixture();
         assert!(app.selected().is_some());

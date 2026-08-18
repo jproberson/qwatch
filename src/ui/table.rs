@@ -31,11 +31,21 @@ impl Order {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Heading {
+    Queue,
+    Status,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
     Columns,
     Blank,
-    Group { name: String, tally: String },
+    Group {
+        name: String,
+        tally: String,
+        kind: Heading,
+    },
     File(Box<Entry>),
     Empty(String),
 }
@@ -88,6 +98,7 @@ fn by_status(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
         rows.push(Row::Group {
             name: status,
             tally: counted(entries.len()),
+            kind: Heading::Status,
         });
         match order {
             Order::Queue => entries.sort_by(|left, right| {
@@ -119,6 +130,7 @@ fn by_queue(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
         rows.push(Row::Group {
             name: queue.name.clone(),
             tally: tally(queue),
+            kind: Heading::Queue,
         });
 
         if queue.file_count() == 0 {
@@ -334,7 +346,7 @@ label    = "{job}"
             .map(|row| match row {
                 Row::Columns => "columns".to_string(),
                 Row::Blank => "blank".to_string(),
-                Row::Group { name, tally } => format!("group {name} ({tally})"),
+                Row::Group { name, tally, .. } => format!("group {name} ({tally})"),
                 Row::Empty(queue) => format!("empty {queue}"),
                 Row::File(entry) => format!("{} {} {}", entry.queue, entry.status, entry.label),
             })

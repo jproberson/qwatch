@@ -1,7 +1,7 @@
 use crate::preview::Line as PreviewLine;
 use crate::ui::App;
 use crate::ui::settings::Section;
-use crate::ui::table::Row;
+use crate::ui::table::{Heading, Row};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use std::time::SystemTime;
@@ -99,10 +99,14 @@ fn list_line<'a>(app: &App, row: &'a Row, widths: &Widths, selected: bool) -> Li
 fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
     match row {
         Row::Blank => Line::from(""),
-        Row::Group { name, tally } => {
+        Row::Group { name, tally, kind } => {
             let used = name.chars().count() + tally.chars().count() + 2;
+            let style = match kind {
+                Heading::Queue => app.theme.queue(),
+                Heading::Status => app.theme.status(app.color_of(name)),
+            };
             Line::from(vec![
-                Span::styled(format!(" {name}"), app.theme.queue()),
+                Span::styled(format!(" {name}"), style.patch(app.theme.awake())),
                 Span::raw(" ".repeat(widths.total.saturating_sub(used).max(1))),
                 Span::styled(tally.clone(), app.theme.muted()),
             ])
