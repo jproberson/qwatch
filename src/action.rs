@@ -32,6 +32,45 @@ pub fn plan(profile: &Profile, action: &Action, entry: &Entry) -> Result<Plan> {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct Batch {
+    pub changes: Vec<Change>,
+    pub refusals: Vec<(String, String)>,
+}
+
+pub fn plan_many(profile: &Profile, action: &Action, entries: &[Entry]) -> Batch {
+    let mut batch = Batch::default();
+    let mut claimed: Vec<PathBuf> = Vec::new();
+
+    for entry in entries {
+        let refuse = |batch: &mut Batch, reason: String| {
+            batch.refusals.push((entry.file_name.clone(), reason));
+        };
+        match plan(profile, action, entry) {
+            Err(reason) => refuse(&mut batch, reason.to_string()),
+            Ok(Plan::Open(_)) => refuse(&mut batch, "cannot be opened in bulk".to_string()),
+            Ok(Plan::Change(change)) => match destination(&change) {
+                Some(target) if claimed.contains(&target) => refuse(
+                    &mut batch,
+                    "another file in this batch already claims that name".to_string(),
+                ),
+                target => {
+                    claimed.extend(target);
+                    batch.changes.push(change);
+                }
+            },
+        }
+    }
+    batch
+}
+
+fn destination(change: &Change) -> Option<PathBuf> {
+    match change {
+        Change::Move { to, .. } => Some(to.clone()),
+        Change::Delete { .. } => None,
+    }
+}
+
 pub fn apply(change: &Change) -> Result<()> {
     match change {
         Change::Delete { path } => {

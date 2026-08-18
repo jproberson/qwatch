@@ -138,6 +138,43 @@ in under the name it already has, so it is rejected with no special case. And
 when the target state resolves to the directory the file is already in, it is a
 rename.
 
+### Scope
+
+An action works on one file by default. `scope` widens it to a set defined by
+the row under the cursor, which keeps bulk work in the same mental model as
+single work: point at a file, then say how far the action reaches.
+
+| Scope | Reaches |
+| --- | --- |
+| `one` | The file under the cursor. The default |
+| `all` | Every file listed |
+| `queue` | Every file in the same queue |
+| `status` | Every file with the same status |
+| `job` | Every file with the same label |
+
+```toml
+[[profile.ingest.action]]
+key   = "D"
+name  = "delete"
+type  = "delete"
+scope = "all"
+```
+
+Every guard still runs per file, and a file that refuses is skipped rather than
+failing the batch, because "restart everything that failed" should not be
+stopped by one file that was already restarted. The prompt counts both: `restart
+8 of 12 files that are failed?`, with the first few refusals and their reasons
+underneath. If every file refuses, nothing is confirmed at all and the reason is
+reported instead.
+
+Bulk needs one guard that single work does not. Two files can plan a move to the
+same name, which each check passes alone because the target does not exist yet,
+and `rename` on Unix overwrites silently, so the second would destroy the first.
+Targets claimed earlier in a batch are refused later in it.
+
+An `edit` action cannot take a scope, since opening twelve files in an editor is
+not a thing anyone means. That is refused when the config loads.
+
 A fourth type, `command`, would run a shell template against the selected file.
 It is deliberately not in the first version. It is the only action that cannot
 be guarded, and shipping without it means every safety property here is

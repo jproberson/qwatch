@@ -235,6 +235,12 @@ impl Profile {
                 ),
                 _ => {}
             }
+            if action.kind == ActionKind::Edit && action.scope != Scope::One {
+                bail!(
+                    "action {:?} opens an editor, so it can only work on one file",
+                    action.name
+                );
+            }
             for capture in action.set.keys() {
                 if !known.contains(capture.as_str()) {
                     bail!(
@@ -365,6 +371,29 @@ pub enum ActionKind {
     Edit,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    #[default]
+    One,
+    All,
+    Queue,
+    Status,
+    Job,
+}
+
+impl Scope {
+    pub fn named(self) -> &'static str {
+        match self {
+            Scope::One => "one",
+            Scope::All => "all",
+            Scope::Queue => "queue",
+            Scope::Status => "status",
+            Scope::Job => "job",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Action {
@@ -376,6 +405,8 @@ pub struct Action {
     pub to_state: Option<String>,
     #[serde(default)]
     pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub scope: Scope,
     #[serde(default = "yes")]
     pub confirm: bool,
 }

@@ -79,6 +79,23 @@ the root. A move refuses when something already occupies the target name, and
 refuses as a no-op when it would change neither directory nor name. Actions
 cannot run arbitrary shell commands, so those guarantees hold absolutely.
 
+## Acting on many files at once
+
+Any action can reach past the file under the cursor:
+
+```toml
+[[profile.ingest.action]]
+key   = "D"
+name  = "delete"
+type  = "delete"
+scope = "all"        # or queue, status, job
+```
+
+`scope = "job"` deletes every file with the same label as the one you are on,
+`scope = "status"` restarts everything that failed. Guards still run per file,
+so a file that refuses is skipped and counted rather than stopping the rest, and
+the prompt tells you how many of each before anything happens.
+
 ## Keys
 
 vim defaults, all rebindable:

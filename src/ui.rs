@@ -3,7 +3,7 @@ pub mod table;
 pub mod theme;
 
 use crate::action::{self, Change, Plan};
-use crate::config::{Action, Profile, StatusColor};
+use crate::config::{Action, ActionKind, Profile, Scope, StatusColor};
 use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::scan::{self, Entry, Queue};
@@ -26,7 +26,8 @@ const PAGE: isize = 10;
 
 pub struct Prompt {
     pub question: String,
-    change: Change,
+    pub detail: Vec<String>,
+    changes: Vec<Change>,
 }
 
 pub struct App {
@@ -182,35 +183,115 @@ impl App {
             .map(|(_, action)| action.clone())
     }
 
+    fn in_scope(&self, scope: Scope) -> Vec<Entry> {
+        let Some(selected) = self.selected() else {
+            return Vec::new();
+        };
+        self.rows
+            .iter()
+            .filter_map(Row::entry)
+            .filter(|entry| match scope {
+                Scope::One => entry.path == selected.path,
+                Scope::All => true,
+                Scope::Queue => entry.queue == selected.queue,
+                Scope::Status => entry.status == selected.status,
+                Scope::Job => entry.label == selected.label,
+            })
+            .cloned()
+            .collect()
+    }
+
     fn begin(&mut self, action: &Action) {
-        let Some(entry) = self.selected() else {
+        let entries = self.in_scope(action.scope);
+        let Some(first) = entries.first() else {
             self.message = Some("nothing selected".to_string());
             return;
         };
-        match action::plan(&self.profile, action, entry) {
-            Err(refusal) => self.message = Some(refusal.to_string()),
-            Ok(Plan::Open(path)) => {
-                self.edit = Some(path);
-                self.running = false;
-            }
-            Ok(Plan::Change(change)) => {
-                let plan = Plan::Change(change.clone());
-                if action.confirm {
-                    self.prompt = Some(Prompt {
-                        question: format!("{}?", plan.describe(&self.canonical_root)),
-                        change,
-                    });
-                } else {
-                    self.carry_out(change);
+
+        if action.kind == ActionKind::Edit {
+            match action::plan(&self.profile, action, first) {
+                Ok(Plan::Open(path)) => {
+                    self.edit = Some(path);
+                    self.running = false;
                 }
+                Ok(Plan::Change(_)) => {}
+                Err(refusal) => self.message = Some(refusal.to_string()),
             }
+            return;
+        }
+
+        let batch = action::plan_many(&self.profile, action, &entries);
+        if batch.changes.is_empty() {
+            self.message = Some(self.why_nothing(&batch));
+            return;
+        }
+        if !action.confirm {
+            self.carry_out(batch.changes);
+            return;
+        }
+        self.prompt = Some(Prompt {
+            question: self.question_for(action, &batch),
+            detail: refusal_lines(&batch),
+            changes: batch.changes,
+        });
+    }
+
+    fn why_nothing(&self, batch: &action::Batch) -> String {
+        match batch.refusals.as_slice() {
+            [] => "nothing to do".to_string(),
+            [(_, only)] => only.clone(),
+            many => format!("all {} refused: {}", many.len(), many[0].1),
         }
     }
 
-    fn carry_out(&mut self, change: Change) {
-        if let Err(failure) = action::apply(&change) {
-            self.message = Some(failure.to_string());
+    fn question_for(&self, action: &Action, batch: &action::Batch) -> String {
+        if action.scope == Scope::One && batch.changes.len() == 1 {
+            return format!(
+                "{}?",
+                Plan::Change(batch.changes[0].clone()).describe(&self.canonical_root)
+            );
         }
+        let total = batch.changes.len() + batch.refusals.len();
+        let counted = match batch.refusals.is_empty() {
+            true => format!("{} files", batch.changes.len()),
+            false => format!("{} of {total} files", batch.changes.len()),
+        };
+        format!(
+            "{} {counted}{}?",
+            action.name,
+            self.scope_shown(action.scope)
+        )
+    }
+
+    fn scope_shown(&self, scope: Scope) -> String {
+        let Some(selected) = self.selected() else {
+            return String::new();
+        };
+        match scope {
+            Scope::Queue => format!(" in {}", selected.queue),
+            Scope::Status => format!(" that are {}", selected.status),
+            Scope::Job => format!(" of {}", selected.label),
+            _ => String::new(),
+        }
+    }
+
+    fn carry_out(&mut self, changes: Vec<Change>) {
+        let mut failed = Vec::new();
+        for change in &changes {
+            if let Err(failure) = action::apply(change) {
+                failed.push(failure.to_string());
+            }
+        }
+        self.message = match failed.as_slice() {
+            [] => None,
+            [only] => Some(only.clone()),
+            many => Some(format!(
+                "{} of {} failed: {}",
+                many.len(),
+                changes.len(),
+                many[0]
+            )),
+        };
         let _ = self.rescan();
     }
 
@@ -219,7 +300,7 @@ impl App {
             return;
         };
         if matches!(key, KeyCode::Char('y') | KeyCode::Char('Y')) {
-            self.carry_out(prompt.change);
+            self.carry_out(prompt.changes);
         }
     }
 
@@ -376,6 +457,24 @@ fn resting_color(state: &crate::config::State) -> StatusColor {
     }
 }
 
+fn refusal_lines(batch: &action::Batch) -> Vec<String> {
+    if batch.refusals.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!("{} refused:", batch.refusals.len())];
+    lines.extend(
+        batch
+            .refusals
+            .iter()
+            .take(3)
+            .map(|(name, reason)| format!("  {name}: {reason}")),
+    );
+    if batch.refusals.len() > 3 {
+        lines.push(format!("  and {} more", batch.refusals.len() - 3));
+    }
+    lines
+}
+
 pub fn run(profile: Profile) -> Result<()> {
     let mut app = App::new(profile)?;
 
@@ -503,6 +602,26 @@ set      = { claim = "x" }
 key  = "d"
 name = "delete"
 type = "delete"
+
+[[action]]
+key   = "D"
+name  = "delete"
+type  = "delete"
+scope = "all"
+
+[[action]]
+key   = "X"
+name  = "delete"
+type  = "delete"
+scope = "job"
+
+[[action]]
+key      = "A"
+name     = "restart"
+type     = "move"
+to_state = "queued"
+set      = { claim = "x" }
+scope    = "status"
 
 [preview]
 format = "delimited-json"
@@ -839,6 +958,155 @@ label   = "id"
 
         std::fs::write(root.path().join("receipts/x_NewJob-9.txt"), "").unwrap();
         assert!(app.rescan().unwrap(), "a new file should count as a change");
+    }
+
+    fn press(app: &mut App, key: char) {
+        app.on_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+    }
+
+    fn files_left(root: &TempDir) -> usize {
+        ["invoices", "invoices-failed", "receipts", "receipts-failed"]
+            .iter()
+            .filter_map(|directory| std::fs::read_dir(root.path().join(directory)).ok())
+            .map(|listing| listing.flatten().count())
+            .sum()
+    }
+
+    #[test]
+    fn deleting_everything_takes_the_whole_list_at_once() {
+        let (root, mut app) = fixture();
+        assert_eq!(files_left(&root), 3);
+
+        press(&mut app, 'D');
+        let prompt = app.prompt.as_ref().expect("a bulk delete must confirm");
+        assert_eq!(prompt.question, "delete 3 files?");
+
+        app.answer(KeyCode::Char('y'));
+        assert_eq!(files_left(&root), 0);
+        assert_eq!(app.file_count(), 0);
+    }
+
+    #[test]
+    fn declining_a_bulk_delete_leaves_every_file_alone() {
+        let (root, mut app) = fixture();
+        press(&mut app, 'D');
+        app.answer(KeyCode::Char('n'));
+        assert_eq!(files_left(&root), 3);
+    }
+
+    #[test]
+    fn deleting_by_job_takes_only_the_ones_with_that_name() {
+        let (root, mut app) = fixture();
+        std::fs::write(
+            root.path().join("receipts/x_ParseInvoice-7.txt"),
+            "ParseInvoice,7",
+        )
+        .unwrap();
+        app.rescan().unwrap();
+
+        let target = app
+            .rows
+            .iter()
+            .position(|row| {
+                row.entry()
+                    .is_some_and(|entry| entry.label == "ParseInvoice")
+            })
+            .unwrap();
+        app.cursor = target;
+
+        press(&mut app, 'X');
+        assert_eq!(
+            app.prompt.as_ref().unwrap().question,
+            "delete 2 files of ParseInvoice?"
+        );
+
+        app.answer(KeyCode::Char('y'));
+        assert_eq!(files_left(&root), 2);
+        assert!(
+            app.rows
+                .iter()
+                .filter_map(Row::entry)
+                .all(|e| e.label != "ParseInvoice")
+        );
+    }
+
+    #[test]
+    fn a_bulk_restart_says_how_many_it_had_to_refuse() {
+        let (_root, mut app) = fixture();
+        app.cursor = app
+            .rows
+            .iter()
+            .position(|row| row.entry().is_some_and(|entry| entry.status == "waiting"))
+            .unwrap();
+
+        press(&mut app, 'A');
+        assert!(
+            app.prompt.is_none(),
+            "restarting waiting files should refuse outright"
+        );
+        assert!(app.message.as_deref().unwrap().contains("already"));
+    }
+
+    #[test]
+    fn a_bulk_action_refuses_two_files_that_want_the_same_name() {
+        let (root, mut app) = fixture();
+        std::fs::write(
+            root.path().join("receipts-failed/x_ExtractTotals-1.txt"),
+            "",
+        )
+        .unwrap();
+        app.rescan().unwrap();
+
+        app.cursor = app
+            .rows
+            .iter()
+            .position(|row| row.entry().is_some_and(|entry| entry.status == "failed"))
+            .unwrap();
+
+        press(&mut app, 'A');
+        let prompt = app
+            .prompt
+            .as_ref()
+            .expect("some should still be restartable");
+        assert!(
+            prompt
+                .detail
+                .iter()
+                .any(|line| line.contains("already claims that name")),
+            "no warning about the collision: {:?}",
+            prompt.detail
+        );
+    }
+
+    fn footer_of(app: &mut App, width: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 12)).unwrap();
+        terminal.draw(|frame| render::draw(frame, app)).unwrap();
+        as_text(terminal.backend().buffer())
+            .lines()
+            .last()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn the_footer_keeps_help_and_quit_however_narrow_it_gets() {
+        let (_root, mut app) = fixture();
+        for width in [40, 60, 80, 120, 200] {
+            let footer = footer_of(&mut app, width);
+            assert!(footer.contains("help"), "no help at {width}: {footer:?}");
+            assert!(footer.contains("quit"), "no quit at {width}: {footer:?}");
+            assert!(
+                footer.chars().count() <= width as usize,
+                "footer overflows at {width}: {footer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_footer_says_when_it_has_hidden_something() {
+        let (_root, mut app) = fixture();
+        assert!(footer_of(&mut app, 50).contains('\u{2026}'));
+        assert!(!footer_of(&mut app, 200).contains('\u{2026}'));
     }
 
     #[test]

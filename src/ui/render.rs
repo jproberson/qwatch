@@ -18,25 +18,26 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_list(frame, app, left);
     draw_preview(frame, app, right);
-    frame.render_widget(footer_line(app), footer);
+    frame.render_widget(footer_line(app, footer.width as usize), footer);
 
     if app.help {
         draw_overlay(frame, body, "Keys", help_lines(app), app.help_scroll);
     } else if let Some(prompt) = &app.prompt {
-        draw_overlay(
-            frame,
-            body,
-            "Confirm",
-            vec![
-                Line::from(prompt.question.clone()),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "y to go ahead, anything else to cancel",
-                    app.theme.muted(),
-                )),
-            ],
-            0,
+        let mut lines = vec![Line::from(prompt.question.clone()), Line::from("")];
+        lines.extend(
+            prompt
+                .detail
+                .iter()
+                .map(|line| Line::from(Span::styled(line.clone(), app.theme.muted()))),
         );
+        if !prompt.detail.is_empty() {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(
+            "y to go ahead, anything else to cancel",
+            app.theme.muted(),
+        )));
+        draw_overlay(frame, body, "Confirm", lines, 0);
     }
 }
 
@@ -207,24 +208,50 @@ fn preview_line<'a>(app: &App, line: &'a PreviewLine) -> Line<'a> {
     }
 }
 
-fn footer_line(app: &App) -> Line<'static> {
+fn footer_line(app: &App, width: usize) -> Line<'static> {
     if let Some(message) = &app.message {
         return Line::from(Span::styled(format!(" {message}"), app.theme.alert()));
     }
 
     let keys = &app.profile.keys;
-    let mut parts = vec![format!(" {} move", pair(&keys.down, &keys.up))];
-    for action in &app.profile.action {
-        parts.push(format!("{} {}", action.key, action.name));
-    }
-    parts.push(format!("{} rescan", first_of(&keys.rescan)));
-    parts.push(format!(
+    let head = format!(" {} move", pair(&keys.down, &keys.up));
+    let tail = format!(
+        "{} help  {} quit",
+        first_of(&keys.help),
+        first_of(&keys.quit)
+    );
+
+    let mut optional: Vec<String> = app
+        .profile
+        .action
+        .iter()
+        .map(|action| format!("{} {}", action.key, labelled(action)))
+        .collect();
+    optional.push(format!("{} rescan", first_of(&keys.rescan)));
+    optional.push(format!(
         "{} sort:{}",
         first_of(&keys.sort),
         app.order.label()
     ));
-    parts.push(format!("{} help", first_of(&keys.help)));
-    parts.push(format!("{} quit", first_of(&keys.quit)));
+
+    let mut used = head.chars().count() + 2 + tail.chars().count();
+    let mut parts = vec![head];
+    let mut hidden = false;
+
+    for part in optional {
+        let cost = part.chars().count() + 2;
+        match used + cost <= width {
+            true => {
+                used += cost;
+                parts.push(part);
+            }
+            false => hidden = true,
+        }
+    }
+    if hidden && used + 3 <= width {
+        parts.push("\u{2026}".to_string());
+    }
+    parts.push(tail);
 
     Line::from(Span::styled(parts.join("  "), app.theme.muted()))
 }
@@ -245,7 +272,7 @@ fn help_lines(app: &App) -> Vec<Line<'static>> {
         .profile
         .action
         .iter()
-        .map(|action| key_line(app, &action.key, &action.name))
+        .map(|action| key_line(app, &action.key, &labelled(action)))
         .collect();
     lines.extend(
         app.profile
@@ -255,6 +282,13 @@ fn help_lines(app: &App) -> Vec<Line<'static>> {
             .map(|(keys, meaning)| key_line(app, &keys, meaning)),
     );
     lines
+}
+
+fn labelled(action: &crate::config::Action) -> String {
+    match action.scope {
+        crate::config::Scope::One => action.name.clone(),
+        scope => format!("{} {}", action.name, scope.named()),
+    }
 }
 
 fn key_line(app: &App, key: &str, meaning: &str) -> Line<'static> {
