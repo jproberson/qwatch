@@ -1,5 +1,6 @@
 use crate::preview::Line as PreviewLine;
 use crate::ui::App;
+use crate::ui::settings::Section;
 use crate::ui::table::Row;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Wrap};
@@ -20,7 +21,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_preview(frame, app, right);
     frame.render_widget(footer_line(app, footer.width as usize), footer);
 
-    if app.help {
+    if let Some(panel) = &app.panel {
+        draw_settings(frame, app, panel, body);
+    } else if app.help {
         draw_overlay(frame, body, "Keys", help_lines(app), app.help_scroll);
     } else if let Some(prompt) = &app.prompt {
         let mut lines = vec![Line::from(prompt.question.clone()), Line::from("")];
@@ -235,11 +238,24 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
 
     let keys = &app.profile.keys;
     let head = format!(" {} move", pair(&keys.down, &keys.up));
-    let tail = format!(
-        "{} help  {} quit",
-        first_of(&keys.help),
-        first_of(&keys.quit)
-    );
+    let head_cost = head.chars().count() + 2;
+    let tail = [
+        format!(
+            "{} settings  {} help  {} quit",
+            first_of(&keys.settings),
+            first_of(&keys.help),
+            first_of(&keys.quit)
+        ),
+        format!(
+            "{} help  {} quit",
+            first_of(&keys.help),
+            first_of(&keys.quit)
+        ),
+        format!("{} quit", first_of(&keys.quit)),
+    ]
+    .into_iter()
+    .find(|candidate| head_cost + candidate.chars().count() <= width)
+    .unwrap_or_default();
 
     let mut optional: Vec<String> = app
         .profile
@@ -248,18 +264,8 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
         .map(|action| format!("{} {}", action.key, app.labelled(action)))
         .collect();
     optional.push(format!("{} rescan", first_of(&keys.rescan)));
-    optional.push(format!(
-        "{} sort:{}",
-        first_of(&keys.sort),
-        app.order.label()
-    ));
-    optional.push(format!(
-        "{} view:{}",
-        first_of(&keys.layout),
-        app.layout.named()
-    ));
 
-    let fixed = head.chars().count() + 2 + tail.chars().count();
+    let fixed = head_cost + tail.chars().count();
     let wanted: usize = optional.iter().map(|part| part.chars().count() + 2).sum();
     let budget = match fixed + wanted <= width {
         true => width,
@@ -321,6 +327,103 @@ fn key_line(app: &App, key: &str, meaning: &str) -> Line<'static> {
         Span::styled(format!("{key:<20}"), app.theme.label()),
         Span::raw(meaning.to_string()),
     ])
+}
+
+fn draw_settings(frame: &mut Frame, app: &App, panel: &crate::ui::settings::Panel, area: Rect) {
+    let sections = app.sections();
+    let width = area
+        .width
+        .saturating_sub(area.width / 6)
+        .max(40)
+        .min(area.width);
+    let height = area.height.saturating_sub(2).max(8).min(area.height);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(app.theme.title())
+        .padding(Padding::horizontal(1))
+        .title(Span::styled(" settings ", app.theme.title()))
+        .title_bottom(
+            Line::from(Span::styled(
+                " up/down choose   tab section   enter apply   esc close ",
+                app.theme.muted(),
+            ))
+            .centered(),
+        );
+    let inner = block.inner(popup);
+
+    frame.render_widget(Clear, popup);
+    frame.render_widget(block, popup);
+
+    let [tabs, note, list] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Length(2),
+        Constraint::Min(1),
+    ])
+    .areas(inner);
+
+    frame.render_widget(tab_line(app, panel, &sections), tabs);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            sections
+                .get(panel.tab)
+                .map(|section| section.note.clone())
+                .unwrap_or_default(),
+            app.theme.muted(),
+        ))),
+        note,
+    );
+
+    let Some(section) = sections.get(panel.tab) else {
+        return;
+    };
+    let items: Vec<ListItem> = section
+        .entries
+        .iter()
+        .map(|entry| {
+            let mark = match entry.chosen {
+                true => "\u{2713} ",
+                false => "  ",
+            };
+            let style = match entry.selectable() {
+                true => app.theme.job(),
+                false => app.theme.muted(),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(mark, app.theme.label()),
+                Span::styled(entry.label.clone(), style),
+            ]))
+        })
+        .collect();
+
+    let mut state = ratatui::widgets::ListState::default();
+    state.select(Some(panel.cursor));
+    frame.render_stateful_widget(
+        List::new(items).highlight_style(app.theme.selected()),
+        list,
+        &mut state,
+    );
+}
+
+fn tab_line(app: &App, panel: &crate::ui::settings::Panel, sections: &[Section]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (at, section) in sections.iter().enumerate() {
+        if at > 0 {
+            spans.push(Span::raw("   "));
+        }
+        let style = match at == panel.tab {
+            true => app.theme.selected(),
+            false => app.theme.muted(),
+        };
+        spans.push(Span::styled(section.title.clone(), style));
+    }
+    Line::from(spans)
 }
 
 fn draw_overlay(

@@ -13,6 +13,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use config::{Config, Profile};
 use scan::Queue;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -70,7 +71,7 @@ fn main() -> Result<()> {
         return write_starter_config(directory, print, output);
     }
 
-    let profile = chosen_profile(&options)?;
+    let (profile, catalogue) = chosen_profile(&options)?;
     let queues = scan::scan(&profile)?;
 
     if options.json {
@@ -81,12 +82,12 @@ fn main() -> Result<()> {
         print_listing(&queues);
         return Ok(());
     }
-    ui::run(profile)
+    ui::run(profile, catalogue)
 }
 
-fn chosen_profile(options: &Options) -> Result<Profile> {
+fn chosen_profile(options: &Options) -> Result<(Profile, BTreeMap<String, Profile>)> {
     if let Some(directory) = &options.directory {
-        return Ok(Profile::for_directory(directory));
+        return Ok((Profile::for_directory(directory), BTreeMap::new()));
     }
 
     let path = match &options.config {
@@ -99,9 +100,9 @@ fn chosen_profile(options: &Options) -> Result<Profile> {
             path.display()
         );
     }
-    Ok(Config::load(&path)?
-        .select(options.profile.as_deref())?
-        .clone())
+    let config = Config::load(&path)?;
+    let profile = config.select(options.profile.as_deref())?.clone();
+    Ok((profile, config.profile))
 }
 
 fn print_listing(queues: &[Queue]) {

@@ -106,6 +106,7 @@ pub enum Motion {
     Rescan,
     Sort,
     Layout,
+    Settings,
     Help,
     Quit,
 }
@@ -183,6 +184,7 @@ keymap! {
     rescan       => Rescan,      "rescan now",          ["R"];
     sort         => Sort,        "change sort order",   ["s"];
     layout       => Layout,      "switch layout",       ["t"];
+    settings     => Settings,    "open settings",       ["ctrl-s"];
     help         => Help,        "show these keys",     ["?"];
     quit         => Quit,        "quit",                ["q", "esc"];
 }

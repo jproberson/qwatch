@@ -112,8 +112,13 @@ vim defaults, all rebindable:
 | `R` | Rescan now |
 | `s` | Change sort order |
 | `t` | Switch between the table and grouped layouts |
+| `ctrl-s` | Settings: layout, sort, queues, watching, keys |
 | `?` | Show the keys |
 | `q` `esc` | Quit |
+
+`ctrl-s` opens a settings panel with a section per thing worth changing, which
+is easier than remembering which key cycles what. Changes last for the session;
+edit the config to make them stick.
 
 Actions from your profile bind their own keys on top. Clicking a row selects it,
 and the wheel scrolls whichever pane is under the pointer.

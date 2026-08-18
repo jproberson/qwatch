@@ -1,4 +1,5 @@
 pub mod render;
+pub mod settings;
 pub mod table;
 pub mod theme;
 
@@ -7,6 +8,7 @@ use crate::config::{Action, ActionKind, Layout, Profile, Scope, StatusColor};
 use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::scan::{self, Entry, Queue};
+use crate::ui::settings::{Choice, Panel, Section, choosing, telling};
 use crate::ui::table::{Order, Row};
 use crate::ui::theme::Theme;
 use crate::watch;
@@ -37,11 +39,14 @@ pub struct App {
     pub cursor: usize,
     pub order: Order,
     pub layout: Layout,
+    pub watching: bool,
     pub preview: Vec<PreviewLine>,
     pub preview_scroll: u16,
     pub prompt: Option<Prompt>,
     pub message: Option<String>,
     pub help: bool,
+    pub panel: Option<Panel>,
+    pub catalogue: BTreeMap<String, Profile>,
     pub help_scroll: u16,
     pub theme: Theme,
     pub now: SystemTime,
@@ -58,6 +63,7 @@ pub struct App {
 impl App {
     pub fn new(profile: Profile) -> Result<Self> {
         let layout = profile.layout;
+        let watching = profile.watch.enabled;
         let colors = status_colors(&profile);
         let bindings: Vec<(Binding, Action)> = profile
             .action
@@ -76,11 +82,14 @@ impl App {
             cursor: 0,
             order: Order::default(),
             layout,
+            watching,
             preview: Vec::new(),
             preview_scroll: 0,
             prompt: None,
             message: None,
             help: false,
+            panel: None,
+            catalogue: BTreeMap::new(),
             help_scroll: 0,
             theme: Theme::default(),
             now: SystemTime::now(),
@@ -326,6 +335,10 @@ impl App {
             self.answer(key.code);
             return;
         }
+        if self.panel.is_some() {
+            self.steer_panel(key);
+            return;
+        }
         if self.help {
             match self.profile.keys.motion_for(key) {
                 Some(Motion::Down) => self.help_scroll = self.help_scroll.saturating_add(1),
@@ -348,6 +361,145 @@ impl App {
         }
         if let Some(action) = self.action_for(key) {
             self.begin(&action);
+        }
+    }
+
+    pub fn sections(&self) -> Vec<Section> {
+        let mut sections = vec![
+            Section {
+                title: "layout".to_string(),
+                note: "how the list is shaped".to_string(),
+                entries: [Layout::Table, Layout::Grouped]
+                    .into_iter()
+                    .map(|layout| {
+                        choosing(
+                            layout.named(),
+                            self.layout == layout,
+                            Choice::Layout(layout),
+                        )
+                    })
+                    .collect(),
+            },
+            Section {
+                title: "sort".to_string(),
+                note: "what decides the order".to_string(),
+                entries: [Order::Queue, Order::Age, Order::Status]
+                    .into_iter()
+                    .map(|order| choosing(order.label(), self.order == order, Choice::Sort(order)))
+                    .collect(),
+            },
+        ];
+
+        if self.catalogue.len() > 1 {
+            sections.push(Section {
+                title: "queues".to_string(),
+                note: "which root to browse".to_string(),
+                entries: self
+                    .catalogue
+                    .iter()
+                    .map(|(name, profile)| {
+                        choosing(
+                            &format!("{name}  {}", profile.root.display()),
+                            profile.root == self.profile.root,
+                            Choice::Profile(name.clone()),
+                        )
+                    })
+                    .collect(),
+            });
+        }
+
+        sections.push(Section {
+            title: "watching".to_string(),
+            note: "redraw when the directories change".to_string(),
+            entries: vec![
+                choosing("on", self.watching, Choice::Watching(true)),
+                choosing("off", !self.watching, Choice::Watching(false)),
+            ],
+        });
+        sections.push(Section {
+            title: "keys".to_string(),
+            note: "set these in the config file".to_string(),
+            entries: self
+                .profile
+                .action
+                .iter()
+                .map(|action| telling(format!("{:<12} {}", action.key, self.labelled(action))))
+                .chain(
+                    self.profile
+                        .keys
+                        .described()
+                        .into_iter()
+                        .map(|(keys, meaning)| telling(format!("{keys:<12} {meaning}"))),
+                )
+                .collect(),
+        });
+        sections
+    }
+
+    fn steer_panel(&mut self, key: KeyEvent) {
+        let sections = self.sections();
+        let Some(panel) = self.panel.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => self.panel = None,
+            KeyCode::Tab | KeyCode::Right => panel.switch_tab(1, &sections),
+            KeyCode::BackTab | KeyCode::Left => panel.switch_tab(-1, &sections),
+            KeyCode::Down | KeyCode::Char('j') => panel.step(1, &sections),
+            KeyCode::Up | KeyCode::Char('k') => panel.step(-1, &sections),
+            KeyCode::Enter => {
+                let picked = panel.chosen(&sections).map(|entry| entry.choice.clone());
+                if let Some(choice) = picked {
+                    self.take_up(choice);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn take_up(&mut self, choice: Choice) {
+        match choice {
+            Choice::Nothing => {}
+            Choice::Layout(layout) => {
+                self.layout = layout;
+                self.relist();
+            }
+            Choice::Sort(order) => {
+                self.order = order;
+                self.relist();
+            }
+            Choice::Watching(on) => self.watching = on,
+            Choice::Profile(name) => {
+                if let Some(profile) = self.catalogue.get(&name).cloned() {
+                    self.adopt(profile);
+                }
+            }
+        }
+    }
+
+    fn adopt(&mut self, profile: Profile) {
+        self.canonical_root = profile
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| profile.root.clone());
+        self.colors = status_colors(&profile);
+        self.bindings = profile
+            .action
+            .iter()
+            .filter_map(|action| Some((Binding::parse(&action.key).ok()?, action.clone())))
+            .collect();
+        self.layout = profile.layout;
+        self.watching = profile.watch.enabled;
+        self.profile = profile;
+        self.cursor = 0;
+
+        match scan::scan(&self.profile) {
+            Ok(queues) => {
+                self.rebuild(queues);
+                self.message = None;
+            }
+            Err(failure) => self.message = Some(failure.to_string()),
         }
     }
 
@@ -389,6 +541,9 @@ impl App {
             Motion::Layout => {
                 self.layout = self.layout.other();
                 self.relist();
+            }
+            Motion::Settings => {
+                self.panel = Some(Panel::opened_at(&self.sections()));
             }
         }
     }
@@ -500,8 +655,9 @@ fn refusal_lines(batch: &action::Batch) -> Vec<String> {
     lines
 }
 
-pub fn run(profile: Profile) -> Result<()> {
+pub fn run(profile: Profile, catalogue: BTreeMap<String, Profile>) -> Result<()> {
     let mut app = App::new(profile)?;
+    app.catalogue = catalogue;
 
     loop {
         let mut terminal = ratatui::init();
@@ -535,7 +691,7 @@ fn pump(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut rearm = app.profile.watch.enabled;
 
     while app.running {
-        if rearm {
+        if rearm && app.watching {
             let wanted = watch::targets(&app.profile, &app.queues);
             if wanted != watched {
                 watch = watch::start(&wanted, settings).ok();
@@ -714,6 +870,30 @@ label   = "id"
         app.layout = crate::config::Layout::Grouped;
         app.relist();
         app.refresh_preview();
+        println!("\n{}\n", screen(&mut app, 92, 20));
+    }
+
+    #[test]
+    fn renders_the_settings_panel() {
+        let (root, mut app) = fixture();
+        let mut other = app.profile.clone();
+        other.root = root.path().join("receipts");
+        app.catalogue
+            .insert("ingest".to_string(), app.profile.clone());
+        app.catalogue.insert("receipts-only".to_string(), other);
+        app.panel = Some(Panel::opened_at(&app.sections()));
+        println!("\n{}\n", screen(&mut app, 92, 20));
+    }
+
+    #[test]
+    fn renders_the_settings_keys_tab() {
+        let (_root, mut app) = fixture();
+        let sections = app.sections();
+        let mut panel = Panel::opened_at(&sections);
+        while sections[panel.tab].title != "keys" {
+            panel.switch_tab(1, &sections);
+        }
+        app.panel = Some(panel);
         println!("\n{}\n", screen(&mut app, 92, 20));
     }
 
@@ -1199,6 +1379,125 @@ label   = "id"
 
         assert_eq!(app.layout, crate::config::Layout::Grouped);
         assert!(app.rows.iter().any(|row| matches!(row, Row::Group { .. })));
+    }
+
+    fn tap(app: &mut App, code: KeyCode) {
+        app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn open_settings(app: &mut App) {
+        app.on_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn control_s_opens_the_panel_and_escape_closes_it() {
+        let (_root, mut app) = fixture();
+        open_settings(&mut app);
+        assert!(app.panel.is_some());
+
+        tap(&mut app, KeyCode::Esc);
+        assert!(app.panel.is_none());
+        assert!(
+            app.running,
+            "escape should close the panel, not the browser"
+        );
+    }
+
+    #[test]
+    fn the_panel_swallows_keys_that_would_otherwise_act() {
+        let (root, mut app) = fixture();
+        open_settings(&mut app);
+        tap(&mut app, KeyCode::Char('d'));
+
+        assert!(
+            app.prompt.is_none(),
+            "d reached the delete action through the panel"
+        );
+        assert_eq!(files_left(&root), 3);
+    }
+
+    #[test]
+    fn choosing_a_layout_applies_it() {
+        let (_root, mut app) = fixture();
+        assert_eq!(app.layout, Layout::Table);
+
+        open_settings(&mut app);
+        tap(&mut app, KeyCode::Down);
+        tap(&mut app, KeyCode::Enter);
+
+        assert_eq!(app.layout, Layout::Grouped);
+        assert!(app.rows.iter().any(|row| matches!(row, Row::Group { .. })));
+    }
+
+    #[test]
+    fn tab_moves_between_sections_and_lands_on_what_is_already_set() {
+        let (_root, mut app) = fixture();
+        app.order = Order::Status;
+        open_settings(&mut app);
+
+        tap(&mut app, KeyCode::Tab);
+        let sections = app.sections();
+        let panel = app.panel.as_ref().unwrap();
+        assert_eq!(sections[panel.tab].title, "sort");
+        assert_eq!(
+            panel.chosen(&sections).map(|entry| entry.label.clone()),
+            Some("status".to_string())
+        );
+    }
+
+    #[test]
+    fn turning_watching_off_stops_it_being_rearmed() {
+        let (_root, mut app) = fixture();
+        assert!(app.watching);
+
+        open_settings(&mut app);
+        let sections = app.sections();
+        let watching = sections.iter().position(|s| s.title == "watching").unwrap();
+        app.panel.as_mut().unwrap().tab = watching;
+        tap(&mut app, KeyCode::Down);
+        tap(&mut app, KeyCode::Enter);
+
+        assert!(!app.watching);
+    }
+
+    #[test]
+    fn choosing_another_queue_root_moves_the_whole_browser_to_it() {
+        let (root, mut app) = fixture();
+        let elsewhere = TempDir::new().unwrap();
+        std::fs::create_dir(elsewhere.path().join("payroll")).unwrap();
+        std::fs::write(elsewhere.path().join("payroll/x_RunPayroll-3.txt"), "").unwrap();
+
+        let mut other = app.profile.clone();
+        other.root = elsewhere.path().to_path_buf();
+        app.catalogue
+            .insert("here".to_string(), app.profile.clone());
+        app.catalogue.insert("there".to_string(), other);
+
+        open_settings(&mut app);
+        let sections = app.sections();
+        let queues = sections.iter().position(|s| s.title == "queues").unwrap();
+        let there = sections[queues]
+            .entries
+            .iter()
+            .position(|entry| entry.label.starts_with("there"))
+            .unwrap();
+        app.panel.as_mut().unwrap().tab = queues;
+        app.panel.as_mut().unwrap().cursor = there;
+        tap(&mut app, KeyCode::Enter);
+
+        assert_ne!(app.profile.root, root.path());
+        assert!(
+            app.rows
+                .iter()
+                .filter_map(Row::entry)
+                .any(|e| e.label == "RunPayroll")
+        );
+    }
+
+    #[test]
+    fn the_queues_section_stays_hidden_when_there_is_only_one() {
+        let (_root, app) = fixture();
+        assert!(app.sections().iter().all(|s| s.title != "queues"));
     }
 
     #[test]

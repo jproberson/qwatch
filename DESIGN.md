@@ -370,6 +370,29 @@ Behaviour, not configuration:
 - Text labels, never icons
 - `NO_COLOR` is honoured
 
+## Settings
+
+`ctrl-s` opens a panel of sections: layout, sort, queues, watching, keys. Arrows
+choose, `tab` moves between sections, `enter` applies, `esc` closes. A section
+opens on whatever is currently set rather than at the top, so the panel always
+shows you where you are before it lets you change it.
+
+It exists because the alternative was a key per toggle, and the footer was
+already dropping entries to fit. Two keys that each cycle a three-way setting
+tell the reader nothing about what the options are; a list with a tick beside
+the current one tells them everything.
+
+The queues section lists the profiles in the config file and switches the whole
+browser to one, which is the only way to change root without restarting. It is
+hidden when there is only one profile, because a list of one is not a choice.
+The keys section is read-only and says so: it scrolls, but bindings are set in
+the config file.
+
+Changes apply to the running session and are not written back. Rewriting a TOML
+file while keeping its comments and ordering intact is a different problem than
+this panel is worth, and silently reformatting somebody's config would be worse
+than not saving at all.
+
 ## Keys
 
 Defaults are the vim ones, and every motion is rebindable under `[keys]`:
