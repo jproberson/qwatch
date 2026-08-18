@@ -483,6 +483,19 @@ Asking for the browser without a terminal says so instead of panicking, which is
 what happens if the terminal is initialised anyway. Colour follows `NO_COLOR`,
 and `--no-color` says the same thing on the command line.
 
+An update announces itself rather than waiting to be found. A build records the
+commit it came from, and a background `git ls-remote` compares it against the
+repository's head: 219 bytes and a third of a second, with no HTTP client, no
+API and no auth, because git is already required to install the thing. The
+footer's `ctrl-s settings` becomes `ctrl-s update ready`, and the about section
+says so beside the version. A failed check says nothing at all, and
+`update_check = false` turns it off.
+
+Commits are compared rather than versions. Versions only move when one is cut,
+so a version check would report "up to date" through a dozen fixes. The cost is
+that a documentation commit also reads as an update, which is noisy but true,
+and true is the better failure.
+
 The about section of the settings panel updates in place: it leaves the
 terminal, runs the same `cargo install --git` a reader would type, and says to
 start again. It also lists the installed version and the full path of both the

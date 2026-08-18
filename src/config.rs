@@ -100,6 +100,8 @@ pub struct Profile {
     pub keys: Keys,
     #[serde(default = "yes")]
     pub mouse: bool,
+    #[serde(default = "yes")]
+    pub update_check: bool,
     #[serde(default)]
     pub watch: Watch,
 }
@@ -117,6 +119,7 @@ impl Profile {
             layout: Layout::default(),
             keys: Keys::default(),
             mouse: true,
+            update_check: true,
             watch: Watch::default(),
         }
     }
@@ -719,11 +722,13 @@ dir = "failed"
         assert_eq!(profile.watch.debounce_ms, 120);
         assert_eq!(profile.watch.backstop_ms, 4000);
         assert!(profile.mouse);
+        assert!(profile.update_check);
 
         let tuned: Profile = toml::from_str(
             r#"
 root = "/tmp"
 mouse = false
+update_check = false
 [watch]
 enabled = false
 backstop_ms = 0
@@ -734,6 +739,7 @@ backstop_ms = 0
         assert_eq!(tuned.watch.backstop_ms, 0);
         assert_eq!(tuned.watch.debounce_ms, 120);
         assert!(!tuned.mouse);
+        assert!(!tuned.update_check);
     }
 
     #[test]

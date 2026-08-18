@@ -243,9 +243,13 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
 
     let keys = &app.profile.keys;
     let head_cost = 1;
+    let settings = match app.update_ready {
+        true => "update ready",
+        false => "settings",
+    };
     let tail = [
         format!(
-            "{} settings  {} help  {} quit",
+            "{} {settings}  {} help  {} quit",
             first_of(&keys.settings),
             first_of(&keys.help),
             first_of(&keys.quit)

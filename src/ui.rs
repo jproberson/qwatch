@@ -63,6 +63,7 @@ pub struct App {
     running: bool,
     edit: Option<PathBuf>,
     updating: bool,
+    pub update_ready: bool,
 }
 
 impl App {
@@ -110,6 +111,7 @@ impl App {
             running: true,
             edit: None,
             updating: false,
+            update_ready: false,
         };
         app.rebuild(scan::scan(&app.profile)?);
         Ok(app)
@@ -417,7 +419,15 @@ impl App {
             title: "about".to_string(),
             note: "an update replaces the program, not your config".to_string(),
             entries: vec![
-                telling(format!("{:<12} {}", "installed", crate::update::VERSION)),
+                telling(format!(
+                    "{:<12} {}{}",
+                    "installed",
+                    crate::update::VERSION,
+                    match self.update_ready {
+                        true => "   a newer build is available",
+                        false => "",
+                    }
+                )),
                 telling(format!(
                     "{:<12} {}",
                     "config",
@@ -832,6 +842,10 @@ pub fn run(chosen: crate::Chosen) -> Result<()> {
 }
 
 fn pump(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    let asked = match app.profile.update_check {
+        true => Some(crate::update::look_for_one()),
+        false => None,
+    };
     let settings = watch::Settings {
         debounce: Duration::from_millis(app.profile.watch.debounce_ms),
         backstop: Duration::from_millis(app.profile.watch.backstop_ms),
@@ -852,6 +866,11 @@ fn pump(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
 
         terminal.draw(|frame| render::draw(frame, app))?;
 
+        if let Some(asked) = &asked
+            && let Ok(behind) = asked.try_recv()
+        {
+            app.update_ready = behind;
+        }
         if event::poll(POLL)? {
             match event::read()? {
                 Event::Key(key) => app.on_key(key),
@@ -1116,6 +1135,50 @@ label   = "id"
         assert_eq!(
             app.panel.as_ref().unwrap().typing.as_deref(),
             Some("/tmp/x")
+        );
+    }
+
+    #[test]
+    fn renders_the_about_tab_with_an_update_waiting() {
+        let (root, mut app) = fixture();
+        app.config_path = Some(root.path().join("config.toml"));
+        app.book_path = Some(root.path().join("remembered.toml"));
+        app.update_ready = true;
+
+        let sections = app.sections();
+        let mut panel = Panel::opened_at(&sections);
+        while sections[panel.tab].title != "about" {
+            panel.switch_tab(1, &sections);
+        }
+        app.panel = Some(panel);
+        println!("\n{}\n", screen(&mut app, 92, 16));
+    }
+
+    #[test]
+    fn the_footer_says_when_an_update_is_waiting() {
+        let (_root, mut app) = fixture();
+        assert!(footer_of(&mut app, 120).contains("settings"));
+        assert!(!footer_of(&mut app, 120).contains("update ready"));
+
+        app.update_ready = true;
+        let footer = footer_of(&mut app, 120);
+        assert!(footer.contains("update ready"), "{footer:?}");
+    }
+
+    #[test]
+    fn the_about_tab_says_when_an_update_is_waiting() {
+        let (_root, mut app) = fixture();
+        let quiet = app.sections();
+        let before = quiet.iter().find(|s| s.title == "about").unwrap();
+        assert!(!before.entries[0].label.contains("newer"));
+
+        app.update_ready = true;
+        let noisy = app.sections();
+        let after = noisy.iter().find(|s| s.title == "about").unwrap();
+        assert!(
+            after.entries[0]
+                .label
+                .contains("a newer build is available")
         );
     }
 
