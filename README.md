@@ -111,6 +111,7 @@ vim defaults, all rebindable:
 | `enter` | Open in `$EDITOR` |
 | `R` | Rescan now |
 | `s` | Change sort order |
+| `t` | Switch between the table and grouped layouts |
 | `?` | Show the keys |
 | `q` `esc` | Quit |
 

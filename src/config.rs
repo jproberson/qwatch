@@ -95,6 +95,8 @@ pub struct Profile {
     #[serde(default)]
     pub ignore: Ignore,
     #[serde(default)]
+    pub layout: Layout,
+    #[serde(default)]
     pub keys: Keys,
     #[serde(default = "yes")]
     pub mouse: bool,
@@ -112,6 +114,7 @@ impl Profile {
             action: Vec::new(),
             preview: Preview::default(),
             ignore: Ignore::default(),
+            layout: Layout::default(),
             keys: Keys::default(),
             mouse: true,
             watch: Watch::default(),
@@ -369,6 +372,30 @@ pub enum ActionKind {
     Move,
     Delete,
     Edit,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Table,
+    Grouped,
+}
+
+impl Layout {
+    pub fn other(self) -> Self {
+        match self {
+            Layout::Table => Layout::Grouped,
+            Layout::Grouped => Layout::Table,
+        }
+    }
+
+    pub fn named(self) -> &'static str {
+        match self {
+            Layout::Table => "table",
+            Layout::Grouped => "grouped",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

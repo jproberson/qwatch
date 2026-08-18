@@ -105,6 +105,7 @@ pub enum Motion {
     Edit,
     Rescan,
     Sort,
+    Layout,
     Help,
     Quit,
 }
@@ -181,6 +182,7 @@ keymap! {
     edit         => Edit,        "open in $EDITOR",     ["enter"];
     rescan       => Rescan,      "rescan now",          ["R"];
     sort         => Sort,        "change sort order",   ["s"];
+    layout       => Layout,      "switch layout",       ["t"];
     help         => Help,        "show these keys",     ["?"];
     quit         => Quit,        "quit",                ["q", "esc"];
 }

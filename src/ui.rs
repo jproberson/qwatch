@@ -3,7 +3,7 @@ pub mod table;
 pub mod theme;
 
 use crate::action::{self, Change, Plan};
-use crate::config::{Action, ActionKind, Profile, Scope, StatusColor};
+use crate::config::{Action, ActionKind, Layout, Profile, Scope, StatusColor};
 use crate::keys::{Binding, Motion};
 use crate::preview::{self, Line as PreviewLine};
 use crate::scan::{self, Entry, Queue};
@@ -36,6 +36,7 @@ pub struct App {
     pub rows: Vec<Row>,
     pub cursor: usize,
     pub order: Order,
+    pub layout: Layout,
     pub preview: Vec<PreviewLine>,
     pub preview_scroll: u16,
     pub prompt: Option<Prompt>,
@@ -56,6 +57,7 @@ pub struct App {
 
 impl App {
     pub fn new(profile: Profile) -> Result<Self> {
+        let layout = profile.layout;
         let colors = status_colors(&profile);
         let bindings: Vec<(Binding, Action)> = profile
             .action
@@ -73,6 +75,7 @@ impl App {
             rows: Vec::new(),
             cursor: 0,
             order: Order::default(),
+            layout,
             preview: Vec::new(),
             preview_scroll: 0,
             prompt: None,
@@ -126,7 +129,7 @@ impl App {
 
     fn rebuild(&mut self, queues: Vec<Queue>) {
         let held = self.selected().map(|entry| entry.path.clone());
-        self.rows = table::build(&self.profile, &queues, self.order);
+        self.rows = table::build(&self.profile, &queues, self.order, self.layout);
         self.queues = queues;
         self.cursor = held
             .and_then(|path| table::relocate(&self.rows, &path))
@@ -146,7 +149,7 @@ impl App {
     pub fn rescan(&mut self) -> Result<bool> {
         self.now = SystemTime::now();
         let queues = scan::scan(&self.profile)?;
-        if table::build(&self.profile, &queues, self.order) == self.rows {
+        if table::build(&self.profile, &queues, self.order, self.layout) == self.rows {
             return Ok(false);
         }
         self.rebuild(queues);
@@ -348,6 +351,15 @@ impl App {
         }
     }
 
+    fn relist(&mut self) {
+        let held = self.selected().map(|entry| entry.path.clone());
+        self.rows = table::build(&self.profile, &self.queues, self.order, self.layout);
+        self.cursor = held
+            .and_then(|path| table::relocate(&self.rows, &path))
+            .or_else(|| table::first_file(&self.rows))
+            .unwrap_or(0);
+    }
+
     fn travel(&mut self, motion: Motion) {
         match motion {
             Motion::Down => self.move_cursor(1),
@@ -372,7 +384,11 @@ impl App {
             }
             Motion::Sort => {
                 self.order = self.order.next();
-                let _ = self.rescan();
+                self.relist();
+            }
+            Motion::Layout => {
+                self.layout = self.layout.other();
+                self.relist();
             }
         }
     }
@@ -690,6 +706,15 @@ label   = "id"
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal.draw(|frame| render::draw(frame, app)).unwrap();
         as_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn renders_the_grouped_layout() {
+        let (_root, mut app) = fixture();
+        app.layout = crate::config::Layout::Grouped;
+        app.relist();
+        app.refresh_preview();
+        println!("\n{}\n", screen(&mut app, 92, 20));
     }
 
     #[test]
@@ -1147,6 +1172,33 @@ label   = "id"
             .action_for(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::NONE))
             .unwrap();
         assert_eq!(app.labelled(&restart_status), "restart 1 waiting");
+    }
+
+    #[test]
+    fn switching_layout_keeps_the_file_you_were_on() {
+        let (_root, mut app) = fixture();
+        app.cursor = table::last_file(&app.rows).unwrap();
+        let held = app.selected().unwrap().path.clone();
+
+        app.on_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert_eq!(app.layout, crate::config::Layout::Grouped);
+        assert_eq!(app.selected().unwrap().path, held);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert_eq!(app.layout, crate::config::Layout::Table);
+        assert_eq!(app.selected().unwrap().path, held);
+    }
+
+    #[test]
+    fn a_profile_can_open_straight_into_the_grouped_layout() {
+        let (root, _) = fixture();
+        let mut profile: Profile =
+            toml::from_str(&format!("layout = \"grouped\"{PROFILE}")).unwrap();
+        profile.root = root.path().to_path_buf();
+        let app = App::new(profile).unwrap();
+
+        assert_eq!(app.layout, crate::config::Layout::Grouped);
+        assert!(app.rows.iter().any(|row| matches!(row, Row::Group { .. })));
     }
 
     #[test]

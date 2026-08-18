@@ -292,7 +292,7 @@ shell, and here it would run on every cursor movement.
 │  QUEUE    STATUS  JOB                           AGE ││ job       ExtractTotals           │
 │  invoices empty                                     ││ field 2   0                       │
 │  receipts failed  ParseInvoice #0                0s ││ id        b27e4ac4-1111-2222-3333 │
-│▌ receipts failed  ExtractTotals #1               0s ││ field 4   False                   │
+│█ receipts failed  ExtractTotals #1               0s ││ field 4   False                   │
 │  receipts waiting RenderReport #0                0s ││                                   │
 │                                                     ││ {                                 │
 │                                                     ││   "AnalysisId": 4821,             │
@@ -307,11 +307,42 @@ shell, and here it would run on every cursor movement.
 │                                                     ││                                   │
 │                                                     ││                                   │
 ╰──────────────────────────────────────────── 3 files ╯╰───────────────────────────────────╯
- j/k move  r restart  d delete  R rescan  s sort:queue  ? help  q quit
+ j/k move  r restart  d delete  D delete all 3  X delete 2 failed  …  ? help  q quit
 ```
 
-A flat table on the left, one row per file with a queue column, and the preview
-beside it. Both panes are boxed, which gives the root name and the selected
+Two layouts, `layout = "table"` (the default) or `layout = "grouped"`, switched
+live with `t` because the right one depends on what the queues look like rather
+than on taste.
+
+The table is one row per file with a queue column. It scales to many queues,
+makes any column worth sorting by, and reads as one list.
+
+```
+ QUEUE     STATUS   JOB                            AGE
+ invoices  failed   ValidateSchema #2              19d
+ receipts  failed   ParseInvoice #0                10d
+ receipts  waiting  RenderReport #0                 2d
+```
+
+Grouped gives each queue a heading and its own tally, and drops the queue column
+as redundant. It reads better when there are few queues and you think in terms
+of them, and it shows a queue holding nothing without a placeholder row pretending
+to be a file.
+
+```
+ invoices                          1 failed, 0 queued
+     failed   ValidateSchema #2                   19d
+
+ receipts                          1 failed, 1 queued
+     failed   ParseInvoice #0                     10d
+     waiting  RenderReport #0                      2d
+```
+
+Sorting applies inside each group rather than across them, which is the trade
+grouping makes: you give up "what is oldest anywhere" to get "what is going on
+in this queue". Switching layout keeps the file under the cursor selected.
+
+The preview sits Both panes are boxed, which gives the root name and the selected
 file's label somewhere to live, and the file count a home on the bottom edge.
 The footer names the bound keys, so the help overlay is a courtesy rather than a
 requirement.

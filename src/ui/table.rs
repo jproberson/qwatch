@@ -1,4 +1,4 @@
-use crate::config::Profile;
+use crate::config::{Layout, Profile};
 use crate::scan::{Entry, Queue};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -34,6 +34,8 @@ impl Order {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
     Columns,
+    Blank,
+    Group { name: String, tally: String },
     File(Box<Entry>),
     Empty(String),
 }
@@ -47,7 +49,52 @@ impl Row {
     }
 }
 
-pub fn build(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
+pub fn build(profile: &Profile, queues: &[Queue], order: Order, layout: Layout) -> Vec<Row> {
+    match layout {
+        Layout::Table => flat(profile, queues, order),
+        Layout::Grouped => grouped(profile, queues, order),
+    }
+}
+
+fn grouped(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
+    let mut rows = Vec::new();
+
+    for queue in queues {
+        if !rows.is_empty() {
+            rows.push(Row::Blank);
+        }
+        rows.push(Row::Group {
+            name: queue.name.clone(),
+            tally: tally(queue),
+        });
+
+        if queue.file_count() == 0 {
+            rows.push(Row::Empty(queue.name.clone()));
+            continue;
+        }
+        if order == Order::Queue {
+            for state in &queue.states {
+                rows.extend(state.entries.iter().cloned().map(into_row));
+            }
+            continue;
+        }
+        let mut entries: Vec<Entry> = queue.entries().cloned().collect();
+        sorted(&mut entries, profile, order);
+        rows.extend(entries.into_iter().map(into_row));
+    }
+    rows
+}
+
+fn tally(queue: &Queue) -> String {
+    queue
+        .states
+        .iter()
+        .map(|state| format!("{} {}", state.entries.len(), state.state))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn flat(profile: &Profile, queues: &[Queue], order: Order) -> Vec<Row> {
     let mut rows = vec![Row::Columns];
 
     if order == Order::Queue {
@@ -216,7 +263,16 @@ label    = "{job}"
         }
 
         fn rows(&self, order: Order) -> Vec<Row> {
-            build(&self.profile, &scan::scan(&self.profile).unwrap(), order)
+            self.laid_out(order, Layout::Table)
+        }
+
+        fn laid_out(&self, order: Order, layout: Layout) -> Vec<Row> {
+            build(
+                &self.profile,
+                &scan::scan(&self.profile).unwrap(),
+                order,
+                layout,
+            )
         }
     }
 
@@ -224,6 +280,8 @@ label    = "{job}"
         rows.iter()
             .map(|row| match row {
                 Row::Columns => "columns".to_string(),
+                Row::Blank => "blank".to_string(),
+                Row::Group { name, tally } => format!("group {name} ({tally})"),
                 Row::Empty(queue) => format!("empty {queue}"),
                 Row::File(entry) => format!("{} {} {}", entry.queue, entry.status, entry.label),
             })
@@ -285,6 +343,50 @@ label    = "{job}"
     fn puts_empty_queues_last_when_not_ordered_by_queue() {
         let rows = populated().rows(Order::Age);
         assert_eq!(rows.last(), Some(&Row::Empty("invoices".to_string())));
+    }
+
+    #[test]
+    fn the_grouped_layout_heads_each_queue_with_its_own_tally() {
+        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        assert_eq!(
+            shape(&rows),
+            [
+                "group invoices (0 failed, 0 queued)",
+                "empty invoices",
+                "blank",
+                "group receipts (2 failed, 1 queued)",
+                "receipts failed ParseInvoice",
+                "receipts failed ExtractTotals",
+                "receipts queued RenderReport",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_grouped_layout_has_no_column_header() {
+        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        assert!(!rows.contains(&Row::Columns));
+    }
+
+    #[test]
+    fn the_cursor_still_only_rests_on_files_when_grouped() {
+        let rows = populated().laid_out(Order::Queue, Layout::Grouped);
+        let mut cursor = first_file(&rows).unwrap();
+        for _ in 0..10 {
+            cursor = step(&rows, cursor, 1).unwrap();
+            assert!(rows[cursor].entry().is_some());
+        }
+        assert_eq!(settle(&rows, 0, true), first_file(&rows));
+    }
+
+    #[test]
+    fn sorting_inside_a_group_leaves_the_groups_intact() {
+        let rows = populated().laid_out(Order::Status, Layout::Grouped);
+        let headings: Vec<String> = shape(&rows)
+            .into_iter()
+            .filter(|line| line.starts_with("group "))
+            .collect();
+        assert_eq!(headings.len(), 2);
     }
 
     #[test]

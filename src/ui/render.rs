@@ -42,7 +42,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let widths = Widths::of(&app.rows, area.width.saturating_sub(3) as usize);
+    let widths = Widths::of(
+        &app.rows,
+        area.width.saturating_sub(3) as usize,
+        app.layout == crate::config::Layout::Grouped,
+    );
     let items: Vec<ListItem> = app
         .rows
         .iter()
@@ -95,6 +99,15 @@ fn list_line<'a>(app: &App, row: &'a Row, widths: &Widths, selected: bool) -> Li
 
 fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
     match row {
+        Row::Blank => Line::from(""),
+        Row::Group { name, tally } => {
+            let used = name.chars().count() + tally.chars().count() + 2;
+            Line::from(vec![
+                Span::styled(format!(" {name}"), app.theme.queue()),
+                Span::raw(" ".repeat(widths.total.saturating_sub(used).max(1))),
+                Span::styled(tally.clone(), app.theme.muted()),
+            ])
+        }
         Row::Columns => Line::from(Span::styled(
             format!(
                 " {:queue$} {:status$} {:job$} {:>age$}",
@@ -109,20 +122,24 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
             ),
             app.theme.columns(),
         )),
-        Row::Empty(queue) => Line::from(vec![
-            Span::styled(
-                format!(" {:width$} ", queue, width = widths.queue),
-                app.theme.queue(),
-            ),
-            Span::styled("empty", app.theme.muted()),
-        ]),
+        Row::Empty(queue) => match widths.grouped {
+            true => Line::from(Span::styled("     empty", app.theme.muted())),
+            false => Line::from(vec![
+                Span::styled(
+                    format!(" {:width$} ", queue, width = widths.queue),
+                    app.theme.queue(),
+                ),
+                Span::styled("empty", app.theme.muted()),
+            ]),
+        },
         Row::File(entry) => {
             let job = match &entry.detail {
                 Some(detail) => format!("{} {}", entry.label, detail),
                 None => entry.label.clone(),
             };
-            Line::from(vec![
-                Span::styled(
+            let first = match widths.grouped {
+                true => Span::raw(" ".repeat(widths.queue + 2)),
+                false => Span::styled(
                     format!(
                         " {:width$} ",
                         truncated(&entry.queue, widths.queue),
@@ -130,6 +147,9 @@ fn coloured_line<'a>(app: &App, row: &'a Row, widths: &Widths) -> Line<'a> {
                     ),
                     app.theme.queue(),
                 ),
+            };
+            Line::from(vec![
+                first,
                 Span::styled(
                     entry.status.clone(),
                     app.theme.status(app.color_of(&entry.status)),
@@ -233,14 +253,26 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
         first_of(&keys.sort),
         app.order.label()
     ));
+    optional.push(format!(
+        "{} view:{}",
+        first_of(&keys.layout),
+        app.layout.named()
+    ));
 
-    let mut used = head.chars().count() + 2 + tail.chars().count();
+    let fixed = head.chars().count() + 2 + tail.chars().count();
+    let wanted: usize = optional.iter().map(|part| part.chars().count() + 2).sum();
+    let budget = match fixed + wanted <= width {
+        true => width,
+        false => width.saturating_sub(3),
+    };
+
+    let mut used = fixed;
     let mut parts = vec![head];
     let mut hidden = false;
 
     for part in optional {
         let cost = part.chars().count() + 2;
-        match used + cost <= width {
+        match used + cost <= budget {
             true => {
                 used += cost;
                 parts.push(part);
@@ -248,7 +280,7 @@ fn footer_line(app: &App, width: usize) -> Line<'static> {
             false => hidden = true,
         }
     }
-    if hidden && used + 3 <= width {
+    if hidden {
         parts.push("\u{2026}".to_string());
     }
     parts.push(tail);
@@ -341,14 +373,18 @@ struct Widths {
     queue: usize,
     status: usize,
     job: usize,
+    total: usize,
+    grouped: bool,
 }
 
 impl Widths {
-    fn of(rows: &[Row], available: usize) -> Self {
+    fn of(rows: &[Row], available: usize, grouped: bool) -> Self {
         let mut widths = Self {
             queue: 5,
             status: 6,
             job: 3,
+            total: available,
+            grouped,
         };
         for entry in rows.iter().filter_map(Row::entry) {
             widths.queue = widths.queue.max(entry.queue.len());
@@ -357,7 +393,10 @@ impl Widths {
             let detail = entry.detail.as_ref().map_or(0, |detail| detail.len() + 1);
             widths.job = widths.job.max(entry.label.len() + detail);
         }
-        widths.queue = widths.queue.min(QUEUE_CAP);
+        widths.queue = match grouped {
+            true => 2,
+            false => widths.queue.min(QUEUE_CAP),
+        };
         widths.status = widths.status.min(STATUS_CAP);
 
         let spent = 5 + widths.queue + widths.status + AGE_WIDTH;
